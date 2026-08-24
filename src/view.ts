@@ -3,6 +3,7 @@
 // which carries the one answer route — fully read-only. Ship-next at the top,
 // expanded; everything below it collapsed, in derived rank order. One file,
 // zero dependencies, no build step beyond tsc.
+import { mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,9 @@ import { Store } from './store.js';
 import { Claim, Project, Ranked, RoadmapEvent } from './types.js';
 
 const dbPath = process.env['ROADMAP_DB'] ?? join(homedir(), '.helmo-roadmap', 'roadmap.db');
+// The view may be the first thing to touch a fresh store — don't crash on a
+// missing home directory (caught by launchd on first boot).
+mkdirSync(join(dbPath, '..'), { recursive: true });
 const port = Number(process.env['ROADMAP_VIEW_PORT'] ?? 4410);
 const host = process.env['ROADMAP_VIEW_HOST'] ?? '127.0.0.1';
 const store = new Store(dbPath);
