@@ -1,0 +1,295 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { Store } from './store.js';
+import { Actor, ACTOR_KINDS, DEP_TYPES, EFFORT_SIZES, HORIZONS, Project, RoadmapError, STATUSES, VALUE_LEVELS } from './types.js';
+
+// Single source of truth for the MCP tool surface, Helmo-style: tool
+// descriptions are guidance-as-deployed. Edit them here and only here.
+
+const actorSchema = z
+  .object({
+    name: z.string(),
+    kind: z.enum(ACTOR_KINDS),
+    model: z.string().optional(),
+    version: z.string().optional(),
+    session: z.string().optional(),
+  })
+  .optional()
+  .describe('Who is writing. Omit only when ROADMAP_ACTOR (or HELMO_ACTOR) in the server environment already names you exactly. Interactive sessions: pass your true identity on every write — {name, kind: "agent", model: your exact model ID, version: your harness version}. Writes without a truthful complete identity are rejected.');
+
+function ok(data: unknown, warnings: string[] = []): { content: { type: 'text'; text: string }[] } {
+  const body: Record<string, unknown> = { result: data };
+  if (warnings.length) body['warnings'] = warnings;
+  return { content: [{ type: 'text', text: JSON.stringify(body, null, 1) }] };
+}
+
+function fail(e: unknown): { content: { type: 'text'; text: string }[]; isError: true } {
+  const msg = e instanceof RoadmapError ? e.message : `Unexpected error: ${String(e)}`;
+  return { content: [{ type: 'text', text: JSON.stringify({ error: msg }) }], isError: true };
+}
+
+function compact(p: Project) {
+  return { id: p.id, title: p.title, status: p.status, actual_usd: p.actual_usd, updated_at: p.updated_at };
+}
+
+export function buildServer(store: Store, envActor: Actor | null): McpServer {
+  const resolveActor = (override?: Actor): Actor => override ?? envActor ?? ({} as Actor);
+
+  const server = new McpServer({ name: 'helmo-roadmap', version: '0.1.0' });
+
+  server.registerTool(
+    'roadmap_add_project',
+    {
+      description:
+        `Add a project to the roadmap — the record of work WORTH doing, the layer above Helmo's tickets of work BEING done. Getting an idea in costs nothing: a title, ideally a sentence of body. Everything else (claims, citations, shaping) accretes later; that is the design, not an omission. Bad ideas belong here too — recording an idea and ranking it low is the process succeeding.\n\n` +
+        `A project is a thing that ships ("Helmo v2.0", "Run a hackathon"), not a domain that never ends (that is a Helmo workstream) and not code-shaped by default. New projects enter 'parked' unless you pass status 'shaping' because active work on the description is starting now. Projects are never claimed or executed directly — when one is declared go, a builder breaks it into Helmo tickets and the work happens there.`,
+      inputSchema: {
+        title: z.string().describe('One line, plain human terms'),
+        body: z.string().optional().describe('A sentence is enough to start; the first sweep assesses fit from it'),
+        status: z.enum(['parked', 'shaping']).optional(),
+        actor: actorSchema,
+      },
+    },
+    async ({ actor, ...input }) => {
+      try {
+        const p = store.createProject(resolveActor(actor as Actor | undefined), input);
+        return ok({ id: p.id, project: compact(p) });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_get_project',
+    {
+      description:
+        `Fetch one project: current fields, computed blocked-ness, deps, all claims (value/effort, with authors and reasons), objective citations, and the event history. Use it before shaping, critiquing, or re-ranking — the history is where earlier judgments and their reasons live.`,
+      inputSchema: { project_id: z.string() },
+    },
+    async ({ project_id }) => {
+      try {
+        const p = store.getProject(project_id);
+        return ok({
+          ...p,
+          blocked_by: store.blockedBy(project_id),
+          deps: store.getDeps(project_id),
+          claims: store.getClaims(project_id),
+          citations: store.getCitations(project_id),
+          events: store.getEvents(project_id),
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_list_projects',
+    {
+      description:
+        `The roadmap in derived rank order. Rank is never set by hand: facts (ship_next, in motion, ready, shaping, blocked, parked) set the tier; judgments (cited objective rank, latest value claim, effort) order within it; every row carries a one-line explanation of its position. Terminal projects (shipped/abandoned) are excluded unless you filter for them by status.\n\n` +
+        `The response also carries the charter projection (objectives by the human's rank, and bets) so fit can be assessed without a second call. A project marked "advances nothing stated" is a signal worth reading, not an error — some work is maintenance; the visibility is the point.`,
+      inputSchema: {
+        status: z.enum(STATUSES).optional().describe('Filter to one status; terminal statuses are only visible this way'),
+        limit: z.number().int().optional(),
+      },
+    },
+    async ({ status, limit }) => {
+      try {
+        if (status === 'shipped' || status === 'abandoned') {
+          // Terminal projects have no rank; a plain listing serves the archive.
+          const rows = (store.dumpState()['projects'] as Project[]).filter((p) => p.status === status).slice(0, limit ?? 50);
+          return ok({ projects: rows.map(compact), count: rows.length });
+        }
+        let ranked = store.rankProjects();
+        if (status) ranked = ranked.filter((r) => r.project.status === status);
+        ranked = ranked.slice(0, limit ?? 50);
+        return ok({
+          projects: ranked.map((r) => ({
+            ...compact(r.project),
+            rank: r.rank,
+            explanation: r.explanation,
+            ...(r.blocked_by.length ? { blocked_by: r.blocked_by } : {}),
+          })),
+          count: ranked.length,
+          objectives: store.listObjectives().map((o) => ({ id: o.id, rank: o.rank, horizon: o.horizon, statement: o.statement })),
+          bets: store.listBets().map((b) => ({ id: b.id, statement: b.statement, stake: b.stake, falsifier: b.falsifier })),
+          ship_next: store.shipNext()?.id ?? null,
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_update_project',
+    {
+      description:
+        `Record a change to a project: shaping the description, moving it along the ladder (parked · shaping · ready · shipping · shipped/abandoned), parking it with an exit condition. Every call requires a 'note' — one or two lines, human terms; notes are the story the human reads.\n\n` +
+        `Status rules the store enforces: ship_next is NEVER set here (roadmap_set_ship_next records that human decision). 'ready' is a handoff test — the description is complete enough that a builder could break it into tickets without asking the human anything — and the agent declaring it must not be the one who last shaped the description: a second pair of eyes reads it and asserts the test passes. When parking, record unpark_condition ("revisit when Helmo has one external user") so a sweep can retest the condition instead of the idea rotting silently. Terminal statuses (shipped/abandoned) are permanent; a revived idea is a new project with a 'relates' link.`,
+      inputSchema: {
+        project_id: z.string(),
+        note: z.string(),
+        status: z.enum(['parked', 'shaping', 'ready', 'shipping', 'shipped', 'abandoned']).optional(),
+        title: z.string().optional(),
+        body: z.string().optional().describe('The project description accretes and gets rewritten over months — keep it the document a builder would work from'),
+        parked_reason: z.string().optional(),
+        unpark_condition: z.string().optional().describe('What would unpark this — phrased so a sweep can test it'),
+        actor: actorSchema,
+      },
+    },
+    async ({ actor, ...input }) => {
+      try {
+        const { project, warnings } = store.updateProject(resolveActor(actor as Actor | undefined), input);
+        return ok(compact(project), warnings);
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_record_claim',
+    {
+      description:
+        `Record a value or effort judgment on a project. Judgments are claims with an author, a date, and a one-line reason — never naked numbers; the latest claim of each kind is what ranking uses, and the history stays. Lowering a project's value is ordinary maintenance, not a dispute: the crew agreeing an idea is low-value is the critique working.\n\n` +
+        `value: level high|medium|low. effort: size S|M|L|XL plus predicted_usd — the dollar prediction is checked against the metered actual rolled up from the project's Helmo tickets, which is what teaches the crew what a size really costs and lets falling costs re-sort the list. No hour estimates, no dates.`,
+      inputSchema: {
+        project_id: z.string(),
+        kind: z.enum(['value', 'effort']),
+        level: z.enum(VALUE_LEVELS).optional().describe('value claims'),
+        size: z.enum(EFFORT_SIZES).optional().describe('effort claims'),
+        predicted_usd: z.number().min(0).optional().describe('effort claims: predicted total cost in dollars — the falsifiable half of the estimate'),
+        reason: z.string().describe('One line on why — what makes this high/low value, or what the size hinges on'),
+        actor: actorSchema,
+      },
+    },
+    async ({ actor, ...input }) => {
+      try {
+        return ok(store.recordClaim(resolveActor(actor as Actor | undefined), input));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_cite',
+    {
+      description:
+        `Tie a project to a charter objective with a checkable one-line claim of HOW it advances it ("advances OBJ-3, because …"). This is what rescues value from decoration: the human can disagree with the mapping rather than with a number. A project cites zero or more objectives; citing nothing is a visible signal, not an error. action 'remove' drops a citation that no longer holds.`,
+      inputSchema: {
+        project_id: z.string(),
+        objective_id: z.string(),
+        claim: z.string().optional().describe("Required when adding: how this project advances the objective, one line"),
+        action: z.enum(['add', 'remove']).optional().describe("default 'add'"),
+        actor: actorSchema,
+      },
+    },
+    async ({ actor, ...input }) => {
+      try {
+        return ok({ citations: store.cite(resolveActor(actor as Actor | undefined), input) });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_link_projects',
+    {
+      description:
+        `Add or remove a typed link between projects. 'blocks' (from_id cannot ship until to_id has shipped — blocked-ness is computed from these, never remembered) or 'relates' (soft association, including a revived idea pointing at its abandoned ancestor). Use 'blocks' sparingly, for true prerequisites.`,
+      inputSchema: {
+        from_id: z.string(),
+        to_id: z.string(),
+        type: z.enum(DEP_TYPES),
+        action: z.enum(['add', 'remove']).optional().describe("default 'add'"),
+        actor: actorSchema,
+      },
+    },
+    async ({ from_id, to_id, type, action, actor }) => {
+      try {
+        store.link(resolveActor(actor as Actor | undefined), from_id, to_id, type, action ?? 'add');
+        return ok({ linked: action !== 'remove', from_id, to_id, type });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_set_ship_next',
+    {
+      description:
+        `Record the human's ship-next decision. There is exactly one ship_next — the instant there are three it is priority 1 again in a louder font — and it is ALWAYS the human's call: this tool exists for an agent to record a decision the human stated explicitly, with decided_by naming them and reason carrying their one-line why. Never call it on your own judgment, however ready a project looks. Only a 'ready' project can be declared; any current ship_next steps back to ready in the same event.\n\n` +
+        `In v1 ship_next is disclosure to the fleet (it rides Helmo's standing notice), not tasking: seeing it does not authorize starting the work. Building begins when the project is broken into Helmo tickets and those enter the ready queue like any other work.`,
+      inputSchema: {
+        project_id: z.string(),
+        decided_by: z.string().describe('The human who made the call'),
+        reason: z.string().describe("The human's one-line why, so the fleet reads a decision, not a flag"),
+        actor: actorSchema,
+      },
+    },
+    async ({ actor, ...input }) => {
+      try {
+        const p = store.setShipNext(resolveActor(actor as Actor | undefined), input);
+        return ok({ project: compact(p), note: 'If Helmo carries the standing notice, update it now (helmo_set_notice) so the fleet sees the change on its next queue read.' });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_record_actual',
+    {
+      description:
+        `Record the metered actual cost for a project — the rollup of cost_usd across its Helmo tickets (query them by the ticket 'project' tag). Absolute total, not a delta; the sweep recomputes and re-records it. Never self-report a guess: this figure is what makes effort predictions falsifiable, and it must come from Helmo's meter.`,
+      inputSchema: {
+        project_id: z.string(),
+        actual_usd: z.number().min(0),
+        note: z.string().describe('Where the rollup came from: which Helmo project tag, how many tickets'),
+        actor: actorSchema,
+      },
+    },
+    async ({ actor, ...input }) => {
+      try {
+        return ok(compact(store.recordActual(resolveActor(actor as Actor | undefined), input)));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    'roadmap_set_charter_item',
+    {
+      description:
+        `Upsert one item of the charter projection. The charter is the one thing the human writes and agents only read — it lives in the human's own document, and this records a PROJECTION of it: derive items from that source at the human's direction, never author them. 'source' points back to the authoritative document and derived_at marks when, so drift is visible; when the source changes, re-derive.\n\n` +
+        `shape 'objective': statement, horizon near|long|standing, rank (1 = top — the human ranks a dozen objectives once; project rank inherits from this). shape 'bet': statement, stake, falsifier — bets justify projects that advance no objective but cheaply test a written-down belief. Pass id (OBJ-n / BET-n) to update an existing item; omit it to mint one. Gates and stances are recognized shapes for v2 — do not force them into objectives.`,
+      inputSchema: {
+        shape: z.enum(['objective', 'bet']),
+        id: z.string().optional().describe('Update an existing item; omit to create'),
+        statement: z.string().describe('Short and quotable — citations point at this'),
+        source: z.string().describe('Pointer to the authoritative document this was derived from'),
+        horizon: z.enum(HORIZONS).optional().describe('objectives'),
+        rank: z.number().int().min(1).optional().describe("objectives: the human's ordering, 1 = top"),
+        stake: z.string().optional().describe('bets: what rides on this being true'),
+        falsifier: z.string().optional().describe('bets: what would show it false'),
+        actor: actorSchema,
+      },
+    },
+    async ({ actor, ...input }) => {
+      try {
+        return ok(store.setCharterItem(resolveActor(actor as Actor | undefined), input));
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  return server;
+}
