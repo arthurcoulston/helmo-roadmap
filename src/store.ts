@@ -220,9 +220,13 @@ export class Store {
       const citations = this.getCitations(p.id);
       const value = this.latestClaim(p.id, 'value');
       const effort = this.latestClaim(p.id, 'effort');
+      // Parked outranks blocked-ness: parking is the human's own statement of
+      // inactivity, and a blocker must not float a parked project above the
+      // unblocked prerequisite it waits on (H-441).
       const tier =
         p.status === 'ship_next' ? 0 :
         p.status === 'shipping' ? 1 :
+        p.status === 'parked' ? 5 :
         blocked.length ? 4 :
         p.status === 'ready' ? 2 :
         p.status === 'shaping' ? 3 : 5;
@@ -237,8 +241,12 @@ export class Store {
       return { p, blocked, citations, value, effort, tier, bestObj, valueOrd, effortOrd };
     });
 
+    // Within a tier the actionable prerequisite comes first: a human working
+    // the list top-down should never hit projects they cannot start before
+    // the one they can (H-441).
     entries.sort((a, b) =>
       a.tier - b.tier ||
+      Number(a.blocked.length > 0) - Number(b.blocked.length > 0) ||
       a.bestObj - b.bestObj ||
       a.valueOrd - b.valueOrd ||
       a.effortOrd - b.effortOrd ||

@@ -147,6 +147,26 @@ describe('claims, citations, ranking', () => {
     expect(store.blockedBy(a.id)).toEqual([]);
   });
 
+  it('a blocked project never floats above the unblocked prerequisite it waits on (H-441)', () => {
+    // The 2026-08-27 board shape: keystone R-12 parked and unblocked; R-13,
+    // R-14 parked and waiting on it; R-15 parked and waiting on R-14. The old
+    // tiering put blocked (4) above parked (5), ranking the keystone last.
+    const keystone = store.createProject(mason, { title: 'keystone' });
+    const waiter1 = store.createProject(mason, { title: 'waiter1' });
+    const waiter2 = store.createProject(mason, { title: 'waiter2' });
+    const chained = store.createProject(mason, { title: 'chained' });
+    store.link(mason, waiter1.id, keystone.id, 'blocks', 'add');
+    store.link(mason, waiter2.id, keystone.id, 'blocks', 'add');
+    store.link(mason, chained.id, waiter2.id, 'blocks', 'add');
+    store.recordClaim(mason, { project_id: keystone.id, kind: 'value', level: 'high', reason: 'r' });
+    store.recordClaim(mason, { project_id: waiter1.id, kind: 'value', level: 'high', reason: 'r' });
+
+    const order = store.rankProjects().map((r) => r.project.title);
+    expect(order[0]).toBe('keystone');
+    expect(order.indexOf('keystone')).toBeLessThan(order.indexOf('waiter1'));
+    expect(order.indexOf('keystone')).toBeLessThan(order.indexOf('waiter2'));
+  });
+
   it('blocks cycles are refused', () => {
     const a = store.createProject(mason, { title: 'A' });
     const b = store.createProject(mason, { title: 'B' });
