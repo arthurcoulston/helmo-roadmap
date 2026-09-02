@@ -34,10 +34,10 @@ describe('projects', () => {
     expect(() => store.createProject({ name: 'x', kind: 'agent' }, { title: 't' })).toThrow(/model/);
   });
 
-  it('updates require a note and terminal projects are permanent', () => {
+  it('updates require a note and archived projects are permanent', () => {
     const p = store.createProject(mason, { title: 'T', status: 'shaping' });
     expect(() => store.updateProject(mason, { project_id: p.id, note: '', status: 'ready' })).toThrow(/note/);
-    store.updateProject(bosun, { project_id: p.id, note: 'shipped it', status: 'shipped' });
+    store.updateProject(bosun, { project_id: p.id, note: 'ran its course', status: 'archived' });
     expect(() => store.updateProject(mason, { project_id: p.id, note: 'reopen', status: 'shaping' })).toThrow(/terminal/);
   });
 
@@ -64,30 +64,47 @@ describe('the ready gate', () => {
   });
 });
 
-describe('ship next', () => {
+describe('ship next — the work phase', () => {
   function readyProject(title: string): string {
     const p = store.createProject(mason, { title, status: 'shaping' });
     store.updateProject(bosun, { project_id: p.id, note: 'ready', status: 'ready' });
     return p.id;
   }
 
-  it('only a ready project, only via the recorded human decision, and exactly one', () => {
+  it('only a ready project, only via the recorded human decision', () => {
     const a = readyProject('A');
-    const b = readyProject('B');
     const parked = store.createProject(mason, { title: 'C' });
 
     expect(() => store.updateProject(mason, { project_id: a, note: 'go', status: 'ship_next' as never })).toThrow(/ship_next/);
     expect(() => store.setShipNext(mason, { project_id: parked.id, decided_by: 'arthur', reason: 'r' })).toThrow(/ready/);
     expect(() => store.setShipNext(mason, { project_id: a, decided_by: '', reason: 'r' })).toThrow(/decided_by/);
 
-    store.setShipNext(mason, { project_id: a, decided_by: 'arthur', reason: 'unblocks the fleet' });
-    expect(store.shipNext()!.id).toBe(a);
+    const { ship_next_count } = store.setShipNext(mason, { project_id: a, decided_by: 'arthur', reason: 'unblocks the fleet' });
+    expect(ship_next_count).toBe(1);
+    expect(store.shipNextProjects().map((p) => p.id)).toEqual([a]);
+  });
 
-    // Declaring B demotes A back to ready — the instant there are three,
-    // it is priority 1 again in a louder font.
-    store.setShipNext(mason, { project_id: b, decided_by: 'arthur', reason: 'changed his mind' });
-    expect(store.shipNext()!.id).toBe(b);
-    expect(store.getProject(a).status).toBe('ready');
+  it('several may hold it at once — the count is the resistance signal', () => {
+    const a = readyProject('A');
+    const b = readyProject('B');
+    store.setShipNext(mason, { project_id: a, decided_by: 'arthur', reason: 'go' });
+    const { ship_next_count } = store.setShipNext(mason, { project_id: b, decided_by: 'arthur', reason: 'also go' });
+    expect(ship_next_count).toBe(2);
+    expect(store.getProject(a).status).toBe('ship_next'); // no demotion
+  });
+
+  it('nothing ships that the human never declared go on', () => {
+    const shaped = store.createProject(mason, { title: 'S', status: 'shaping' });
+    expect(() => store.updateProject(mason, { project_id: shaped.id, note: 'shipped it', status: 'shipped_watching' })).toThrow(/go-ahead|ship_next/);
+    // The human is not gated; agents move a project only out of ship_next.
+    const a = readyProject('A');
+    store.setShipNext(mason, { project_id: a, decided_by: 'arthur', reason: 'go' });
+    store.updateProject(mason, { project_id: a, note: 'built, watching', status: 'shipped_watching' });
+    expect(store.getProject(a).status).toBe('shipped_watching');
+    expect(store.getProject(a).closed_at).toBeTruthy();
+    // watching → stable stays open (records the human's maintenance call).
+    store.updateProject(mason, { project_id: a, note: 'quiet for weeks; Arthur calls it worth keeping', status: 'shipped_stable' });
+    expect(store.getProject(a).status).toBe('shipped_stable');
   });
 });
 
@@ -143,7 +160,9 @@ describe('claims, citations, ranking', () => {
     const order = store.rankProjects().map((r) => r.project.title);
     expect(order).toEqual(['B', 'A']); // shaping B outranks blocked-ready A
 
-    store.updateProject(bosun, { project_id: b.id, note: 'done', status: 'shipped' });
+    store.updateProject(bosun, { project_id: b.id, note: 'ok', status: 'ready' });
+    store.setShipNext(mason, { project_id: b.id, decided_by: 'arthur', reason: 'go' });
+    store.updateProject(bosun, { project_id: b.id, note: 'done, watching', status: 'shipped_watching' });
     expect(store.blockedBy(a.id)).toEqual([]);
   });
 
@@ -209,6 +228,18 @@ describe('the invariant', () => {
     store.setShipNext(mason, { project_id: a.id, decided_by: 'arthur', reason: 'go' });
     store.recordActual(bosun, { project_id: a.id, actual_usd: 3, note: '1 ticket' });
     store.updateProject(mason, { project_id: b.id, note: 'park it', status: 'parked', unpark_condition: 'when A ships' });
+
+    const before = JSON.stringify(store.dumpState());
+    store.rebuild();
+    expect(JSON.stringify(store.dumpState())).toBe(before);
+  });
+
+  it('holds when a cite or link is the last event on a project (the updated_at bump lives in apply)', () => {
+    store.setCharterItem(mason, { shape: 'objective', statement: 'O', horizon: 'near', rank: 1, source: 's' });
+    const a = store.createProject(mason, { title: 'A' });
+    const b = store.createProject(mason, { title: 'B' });
+    store.cite(mason, { project_id: a.id, objective_id: 'OBJ-1', claim: 'how' });
+    store.link(mason, b.id, a.id, 'relates', 'add');
 
     const before = JSON.stringify(store.dumpState());
     store.rebuild();

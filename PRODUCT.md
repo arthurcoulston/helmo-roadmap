@@ -77,8 +77,17 @@ routine work is never forced into a fake one.
 
 ## Status
 
-`parked` · `shaping` · `ready` · `ship_next` · `shipping` · `shipped` /
-`abandoned`
+`parked` · `shaping` · `ready` · `ship_next` · `shipped_watching` ·
+`shipped_stable` · `archived`
+
+*(Ladder v2, ratified 2026-09-02. v1 had a separate `shipping` status beside a
+singular ship_next flag, and terminal `shipped`/`abandoned`; in practice the
+two work-phase names were used interchangeably, and freshly-shipped projects
+had nowhere to be watched from.)*
+
+**The first three rungs are The List.** Recorded, refined, scored, and ranked —
+and deliberately not worked: the only labor a listed project takes is sharpening
+its definition until it can be scored and handed off well.
 
 **Blocked is not a status.** As in Helmo, it is computed from dependencies, not
 remembered by whoever touched the record last.
@@ -89,10 +98,24 @@ without asking the human anything. That is testable — and it is gated the way
 crew filings already are: an agent other than the one who shaped it must read
 it and assert the test passes.
 
-**Ship next is the human's call, and there is exactly one.** The instant there
-are three, it is priority 1 again in a louder font. The human does not type it:
-an agent records the decision with attribution, the way Helmo's answer route
-already works. The provenance is the point.
+**Ship next is the work phase, entered only on the human's go-ahead.** Nothing
+is ever being shipped that the human did not declare go on — the store rejects
+any other door in. Several projects may hold it at once, but with resistance:
+the count is surfaced everywhere, a growing work phase is read as a problem,
+and the standing aim is moving projects OFF it the moment they are close. The
+human does not type the go-ahead: an agent records the decision with
+attribution, the way Helmo's answer route already works. The provenance is the
+point.
+
+**Shipped splits by attention.** `shipped_watching` is newly shipped —
+monitoring, feedback, bug fixes, loose ends. `shipped_stable` records a
+standing human decision that the project's maintenance is worth it. Neither is
+terminal.
+
+**Archived is the one terminal state.** The project ran its course and no
+longer earns its maintenance: surfaces closed and taken down, the record kept
+permanently out of the way. Ideas killed before shipping land here too. A
+revived idea is a new project with a `relates` link to its ancestor.
 
 **Parking carries its own exit.** A parked project records why it is parked and
 what would unpark it ("revisit when Helmo has one external user"), so a sweep

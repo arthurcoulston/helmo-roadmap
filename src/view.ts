@@ -83,7 +83,7 @@ function details(r: Ranked): string {
   ${timeline(store.getEvents(r.project.id))}`;
 }
 
-// The hero: the one thing the human has declared go.
+// The hero cards: the work phase — everything the human has declared go on.
 function shipNextCard(r: Ranked): string {
   const decision = [...store.getEvents(r.project.id)].reverse().find((e) => e.event_type === 'ship_next_set');
   return `<article class="hero-card" id="${esc(r.project.id)}">
@@ -105,7 +105,7 @@ function row(r: Ranked): string {
       <span class="rank">${r.rank}</span>
       <span class="pid">${esc(p.id)}</span>
       <span class="rtitle">${esc(p.title)}</span>
-      <span class="badge quiet">${esc(p.status === 'ship_next' ? 'ship next' : p.status)}</span>
+      <span class="badge quiet">${esc(STATUS_LABEL[p.status] ?? p.status)}</span>
       ${r.blocked_by.length ? `<span class="badge serious">⛔ waits on ${esc(r.blocked_by.join(', '))}</span>` : ''}
       ${noCite ? '<span class="badge quiet">∅ advances nothing stated</span>' : ''}
       <span class="rmeta">${money(p, r.effort)} · ${esc(rel(p.updated_at))}</span>
@@ -115,10 +115,18 @@ function row(r: Ranked): string {
   </details>`;
 }
 
-function terminalRow(p: Project): string {
+const STATUS_LABEL: Record<string, string> = {
+  ship_next: 'ship next',
+  shipped_watching: 'watching',
+  shipped_stable: 'stable',
+};
+
+// Off-list rows: shipped (watching/stable) and archived projects carry no
+// rank — the body and the trail are what a reader comes for.
+function shelfRow(p: Project): string {
   return `<details class="prow" id="${esc(p.id)}">
     <summary><span class="pid">${esc(p.id)}</span><span class="rtitle">${esc(p.title)}</span>
-      <span class="badge quiet">${esc(p.status)}</span>
+      <span class="badge quiet">${esc(STATUS_LABEL[p.status] ?? p.status)}</span>
       <span class="rmeta">${p.actual_usd ? `$${p.actual_usd.toFixed(2)} metered · ` : ''}${esc(rel(p.closed_at ?? p.updated_at))}</span></summary>
     ${p.body ? `<div class="body">${esc(p.body)}</div>` : ''}
     ${timeline(store.getEvents(p.id))}
@@ -145,13 +153,14 @@ function charterStrip(): string {
 function page(): string {
   const ranked = store.rankProjects();
   const shipNext = ranked.filter((r) => r.project.status === 'ship_next');
-  const shipping = ranked.filter((r) => r.project.status === 'shipping');
-  const rest = ranked.filter((r) => r.project.status !== 'ship_next' && r.project.status !== 'shipping');
-  const terminal = (store.dumpState()['projects'] as Project[]).filter((p) => p.status === 'shipped' || p.status === 'abandoned');
-  const shipped = terminal.filter((p) => p.status === 'shipped');
-  const abandoned = terminal.filter((p) => p.status === 'abandoned');
+  const rest = ranked.filter((r) => r.project.status !== 'ship_next');
+  const all = store.dumpState()['projects'] as Project[];
+  const watching = all.filter((p) => p.status === 'shipped_watching');
+  const stable = all.filter((p) => p.status === 'shipped_stable');
+  const archived = all.filter((p) => p.status === 'archived');
 
-  const stat = (n: number, label: string) => `<div class="stat"><div class="stat-n">${n}</div><div class="stat-l">${label}</div></div>`;
+  const stat = (n: number, label: string, alarm = false) =>
+    `<div class="stat"><div class="stat-n${alarm ? ' alarm' : ''}">${n}</div><div class="stat-l">${label}</div></div>`;
   const count = (s: string) => ranked.filter((r) => r.project.status === s).length;
 
   return `<!doctype html><html lang="en"><meta charset="utf-8">
@@ -162,25 +171,26 @@ function page(): string {
 <header class="top">
   <div class="brand"><h1>Roadmap</h1><span class="tagline">work worth doing · agents write, you read</span></div>
   <div class="stats">
-    ${stat(count('ready'), 'ready')}${stat(count('shaping'), 'shaping')}${stat(count('parked'), 'parked')}${stat(shipped.length, 'shipped')}
+    ${stat(shipNext.length, 'ship next', shipNext.length >= 3)}${stat(watching.length, 'watching')}${stat(count('ready'), 'ready')}${stat(count('shaping'), 'shaping')}${stat(count('parked'), 'parked')}
   </div>
 </header>
 
 <section class="hero">
-  <h2>Ship next</h2>
-  ${shipNext.length ? shipNext.map(shipNextCard).join('') : '<p class="allclear">Nothing is declared. The list below is ranked and waiting for your call.</p>'}
+  <h2>Ship next${shipNext.length ? ` (${shipNext.length})` : ''}</h2>
+  ${shipNext.length >= 3 ? '<p class="alarm-note">A growing work phase is a problem — what here is close enough to move to watching?</p>' : ''}
+  ${shipNext.length ? shipNext.map(shipNextCard).join('') : '<p class="allclear">Nothing has the go-ahead. The list below is ranked and waiting for your call.</p>'}
 </section>
 
 ${charterStrip()}
 
-${shipping.length ? `<section><h2>Shipping</h2>${shipping.map(row).join('')}</section>` : ''}
+${watching.length ? `<section><h2>Shipped — watching</h2>${watching.map(shelfRow).join('')}</section>` : ''}
 
 <section><h2>The list</h2>
 ${rest.length ? rest.map(row).join('') : '<p class="allclear">Empty. Ideas cost a title and a sentence.</p>'}
 </section>
 
-${shipped.length ? `<section><h2>Shipped</h2>${shipped.map(terminalRow).join('')}</section>` : ''}
-${abandoned.length ? `<section><h2>Abandoned (${abandoned.length})</h2>${abandoned.map(terminalRow).join('')}</section>` : ''}
+${stable.length ? `<section><h2>Shipped — stable</h2>${stable.map(shelfRow).join('')}</section>` : ''}
+${archived.length ? `<section><h2>Archived (${archived.length})</h2>${archived.map(shelfRow).join('')}</section>` : ''}
 
 <footer>read-only — the record is written by agents, including your decisions · ${esc(dbPath)} · refreshed <span id="age">just now</span></footer>
 <script>${JS}</script>
@@ -207,6 +217,8 @@ body { margin: 0 auto; padding: 28px 32px 64px; max-width: 1080px; background: v
 .tagline { color: var(--muted); margin-left: 10px; font-size: 13px; }
 .stats { display: flex; gap: 22px; }
 .stat-n { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+.stat-n.alarm { color: var(--serious); }
+.alarm-note { color: var(--serious); font-size: 12.5px; margin: 4px 0 8px; }
 .stat-l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); font-weight: 600;
   margin: 34px 0 10px; padding-top: 14px; border-top: 1px solid var(--hairline); }

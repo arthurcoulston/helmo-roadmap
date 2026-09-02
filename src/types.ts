@@ -2,10 +2,24 @@
 // rewritten over months, and it is never ready work — you claim its tickets,
 // never the project itself (PRODUCT.md).
 
-export const STATUSES = ['parked', 'shaping', 'ready', 'ship_next', 'shipping', 'shipped', 'abandoned'] as const;
+// The ladder (ratified by Arthur 2026-09-02, H-672): parked · shaping · ready
+// are The List — refined and ranked, never worked. ship_next is THE work
+// phase, entered only through the human's recorded go-ahead (several may hold
+// it, with resistance — a growing set is a problem the surfaces must show).
+// shipped_watching (newly shipped: monitoring, loose ends) and shipped_stable
+// (low maintenance, and a standing decision the maintenance is worth it) are
+// post-ship, not terminal. archived is the one terminal state: ran its
+// course, surfaces closed — killed-before-shipping ideas land here too.
+export const STATUSES = ['parked', 'shaping', 'ready', 'ship_next', 'shipped_watching', 'shipped_stable', 'archived'] as const;
 export type Status = (typeof STATUSES)[number];
 
-export const TERMINAL: readonly Status[] = ['shipped', 'abandoned'];
+export const TERMINAL: readonly Status[] = ['archived'];
+
+/** The statuses that count as "has shipped": they release blocks-deps and are
+ *  reachable only through ship_next — work no human declared go on cannot
+ *  ship. (archived releases blockers too: a vanished prerequisite should not
+ *  pin its dependents forever.) */
+export const SHIPPED: readonly Status[] = ['shipped_watching', 'shipped_stable'];
 
 export const DEP_TYPES = ['blocks', 'relates'] as const;
 export type DepType = (typeof DEP_TYPES)[number];

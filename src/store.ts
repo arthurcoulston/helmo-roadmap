@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import {
   Actor, Bet, Citation, Claim, Dep, DepType, EFFORT_SIZES, Horizon, Objective,
-  Project, Ranked, RoadmapError, RoadmapEvent, Status, TERMINAL, VALUE_LEVELS,
+  Project, Ranked, RoadmapError, RoadmapEvent, SHIPPED, Status, TERMINAL, VALUE_LEVELS,
 } from './types.js';
 
 export interface CreateInput {
@@ -189,30 +189,40 @@ export class Store {
   }
 
   /** Blocked is computed from dependencies, never remembered. A blocker
-   *  releases its hold by reaching a terminal status. */
+   *  releases its hold by shipping (or being archived). */
   blockedBy(id: string): string[] {
     return (
       this.db
         .prepare(
           `SELECT d.to_id FROM deps d JOIN projects p ON p.id = d.to_id
-           WHERE d.from_id = ? AND d.type = 'blocks' AND p.status NOT IN ('shipped','abandoned')`,
+           WHERE d.from_id = ? AND d.type = 'blocks' AND p.status NOT IN ('shipped_watching','shipped_stable','archived')`,
         )
         .all(id) as { to_id: string }[]
     ).map((r) => r.to_id);
   }
 
-  shipNext(): Project | null {
-    const row = this.db.prepare("SELECT * FROM projects WHERE status = 'ship_next'").get() as Record<string, unknown> | undefined;
-    return (row as unknown as Project) ?? null;
+  /** The current work phase — every project the human has declared go on.
+   *  Several may hold it; the count itself is a signal the surfaces show. */
+  shipNextProjects(): Project[] {
+    return this.db.prepare("SELECT * FROM projects WHERE status = 'ship_next' ORDER BY id").all() as unknown as Project[];
+  }
+
+  /** Post-ship projects (watching, then stable) — off the ranked list but
+   *  not out of sight: watching carries loose ends someone still owes. */
+  shippedProjects(): Project[] {
+    return this.db
+      .prepare("SELECT * FROM projects WHERE status IN ('shipped_watching','shipped_stable') ORDER BY status, closed_at DESC")
+      .all() as unknown as Project[];
   }
 
   /** The derived order (PRODUCT.md): facts the store knows set the tier —
-   *  ship_next, in motion, ready, shaping, blocked, parked — and judgments
-   *  order within it. Rank is never set by hand, and every position carries
-   *  its one-line explanation. Terminal projects are not ranked. */
+   *  ship_next, ready, shaping, blocked, parked — and judgments order within
+   *  it. Rank is never set by hand, and every position carries its one-line
+   *  explanation. Shipped and archived projects are not ranked: the list is
+   *  the competition for what gets worked, and they are past it. */
   rankProjects(): Ranked[] {
     const rows = this.db
-      .prepare("SELECT * FROM projects WHERE status NOT IN ('shipped','abandoned')")
+      .prepare("SELECT * FROM projects WHERE status NOT IN ('shipped_watching','shipped_stable','archived')")
       .all() as unknown as Project[];
 
     const entries = rows.map((p) => {
@@ -225,11 +235,10 @@ export class Store {
       // unblocked prerequisite it waits on (H-441).
       const tier =
         p.status === 'ship_next' ? 0 :
-        p.status === 'shipping' ? 1 :
-        p.status === 'parked' ? 5 :
-        blocked.length ? 4 :
-        p.status === 'ready' ? 2 :
-        p.status === 'shaping' ? 3 : 5;
+        p.status === 'parked' ? 4 :
+        blocked.length ? 3 :
+        p.status === 'ready' ? 1 :
+        p.status === 'shaping' ? 2 : 4;
       // Project rank inherits from objective rank: the human orders a dozen
       // objectives once; the best-ranked citation carries that hand down here.
       const objRanks = citations
@@ -256,7 +265,6 @@ export class Store {
     return entries.map((e, i) => {
       const tierWord =
         e.p.status === 'ship_next' ? 'SHIP NEXT' :
-        e.p.status === 'shipping' ? 'shipping' :
         e.blocked.length ? `${e.p.status}, waits on ${e.blocked.join(', ')}` :
         e.p.status === 'ready' ? 'ready, no blockers' : e.p.status;
       const parts = [tierWord];
@@ -314,7 +322,19 @@ export class Store {
 
     if (input.status && input.status !== p.status) {
       if ((input.status as string) === 'ship_next') {
-        throw new RoadmapError('ship_next is the human\'s call, recorded with attribution via roadmap_set_ship_next — never a plain status write.');
+        throw new RoadmapError('ship_next is entered only through the human\'s recorded go-ahead — roadmap_set_ship_next, never a plain status write.');
+      }
+      // Nothing ships that the human never declared go on: the shipped
+      // statuses are reachable only from ship_next (or from each other).
+      // Legacy pre-ladder-v2 statuses migrate through the same door.
+      if (
+        SHIPPED.includes(input.status) &&
+        actor.kind !== 'human' &&
+        !['ship_next', 'shipped_watching', 'shipped_stable', 'shipping', 'shipped'].includes(p.status)
+      ) {
+        throw new RoadmapError(
+          `${p.id} is ${p.status} — only a ship_next project can move to ${input.status}. Shipping starts with the human's go-ahead (roadmap_set_ship_next); work the list, don't skip the gate.`,
+        );
       }
       // Ready is a handoff test, gated by a second pair of eyes: the actor
       // declaring it must not be the last one who shaped the description.
@@ -407,12 +427,11 @@ export class Store {
       const ts = now();
       if (action === 'add') {
         this.append(ts, p.id, 'cited', actor, { objective_id: input.objective_id, claim: input.claim });
-        this.applyCited(p.id, { objective_id: input.objective_id, claim: input.claim }, true);
+        this.applyCited(ts, p.id, { objective_id: input.objective_id, claim: input.claim }, true);
       } else {
         this.append(ts, p.id, 'uncited', actor, { objective_id: input.objective_id });
-        this.applyCited(p.id, { objective_id: input.objective_id }, false);
+        this.applyCited(ts, p.id, { objective_id: input.objective_id }, false);
       }
-      this.db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(ts, p.id);
     }).immediate();
     return this.getCitations(p.id);
   }
@@ -427,34 +446,35 @@ export class Store {
       if (action === 'add') {
         this.checkNoBlocksCycle(fromId, toId, type);
         this.append(ts, fromId, 'linked', actor, { to: toId, type });
-        this.applyLinked(fromId, toId, type, true);
+        this.applyLinked(ts, fromId, toId, type, true);
       } else {
         this.append(ts, fromId, 'unlinked', actor, { to: toId, type });
-        this.applyLinked(fromId, toId, type, false);
+        this.applyLinked(ts, fromId, toId, type, false);
       }
-      this.db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(ts, fromId);
     }).immediate();
   }
 
-  /** Exactly one ship_next, and it is the human's decision — an agent only
-   *  records it, with attribution, the way Helmo's answer route works. Any
-   *  current holder steps back to ready in the same event. */
-  setShipNext(actor: Actor, input: { project_id: string; decided_by: string; reason: string }): Project {
+  /** Entry to the work phase, and it is the human's decision — an agent only
+   *  records it, with attribution, the way Helmo's answer route works.
+   *  Several projects may hold ship_next at once, but with resistance: the
+   *  returned count is the signal, and a growing set is a problem. */
+  setShipNext(actor: Actor, input: { project_id: string; decided_by: string; reason: string }): { project: Project; ship_next_count: number } {
     validateActor(actor);
     const p = this.getProject(input.project_id);
-    if (!input.decided_by?.trim()) throw new RoadmapError('decided_by is required: the human who made the call. Ship-next is never an agent\'s own judgment.');
+    if (!input.decided_by?.trim()) throw new RoadmapError('decided_by is required: the human who made the call. Entering the work phase is never an agent\'s own judgment.');
     if (!input.reason?.trim()) throw new RoadmapError('reason is required: the human\'s one-line why, so the fleet reads a decision, not a flag.');
-    if (p.status !== 'ready') {
+    // 'shipping' is the pre-v2 name for the work phase; those rows re-enter
+    // through this same human-gated door during migration (H-672).
+    if (p.status !== 'ready' && (p.status as string) !== 'shipping') {
       throw new RoadmapError(`${p.id} is ${p.status} — only a ready project can be declared ship_next. The ready gate is what makes "go" mean a builder can start.`);
     }
     rejectSwallowedMarkup({ reason: input.reason });
     return this.db.transaction(() => {
       const ts = now();
-      const current = this.shipNext();
-      const payload: Record<string, unknown> = { decided_by: input.decided_by, reason: input.reason, demoted: current?.id ?? null };
+      const payload: Record<string, unknown> = { decided_by: input.decided_by, reason: input.reason };
       this.append(ts, p.id, 'ship_next_set', actor, payload);
       this.applyShipNext(ts, p.id, payload);
-      return this.getProject(p.id);
+      return { project: this.getProject(p.id), ship_next_count: this.shipNextProjects().length };
     }).immediate();
   }
 
@@ -534,10 +554,10 @@ export class Store {
           case 'created': this.applyCreated(ev.ts, ev.payload); break;
           case 'updated': this.applyUpdated(ev.ts, ev.subject_id, ev.payload); break;
           case 'claim_recorded': this.applyClaim(ev.ts, ev.subject_id, ev.actor, ev.payload); break;
-          case 'cited': this.applyCited(ev.subject_id, ev.payload, true); break;
-          case 'uncited': this.applyCited(ev.subject_id, ev.payload, false); break;
-          case 'linked': this.applyLinked(ev.subject_id, ev.payload['to'] as string, ev.payload['type'] as DepType, true); break;
-          case 'unlinked': this.applyLinked(ev.subject_id, ev.payload['to'] as string, ev.payload['type'] as DepType, false); break;
+          case 'cited': this.applyCited(ev.ts, ev.subject_id, ev.payload, true); break;
+          case 'uncited': this.applyCited(ev.ts, ev.subject_id, ev.payload, false); break;
+          case 'linked': this.applyLinked(ev.ts, ev.subject_id, ev.payload['to'] as string, ev.payload['type'] as DepType, true); break;
+          case 'unlinked': this.applyLinked(ev.ts, ev.subject_id, ev.payload['to'] as string, ev.payload['type'] as DepType, false); break;
           case 'ship_next_set': this.applyShipNext(ev.ts, ev.subject_id, ev.payload); break;
           case 'actual_recorded': this.applyActual(ev.subject_id, ev.payload); break;
           case 'objective_set': this.applyCharterItem(ev.ts, 'objective', ev.payload); break;
@@ -590,8 +610,16 @@ export class Store {
       sets.push(`${field} = ?`);
       params.push(d.to as never);
     }
-    const status = diffs['status']?.to as Status | undefined;
-    if (status && TERMINAL.includes(status)) { sets.push('closed_at = ?'); params.push(ts); }
+    // closed_at marks leaving the active pipeline: set on first entry into
+    // the shipped/terminal family (legacy 'shipped'/'abandoned' included),
+    // kept on moves within it.
+    const status = diffs['status']?.to as string | undefined;
+    const from = diffs['status']?.from as string | undefined;
+    const closedFamily = [...SHIPPED, ...TERMINAL, 'shipped', 'abandoned'] as string[];
+    if (status && closedFamily.includes(status) && !(from && closedFamily.includes(from))) {
+      sets.push('closed_at = ?');
+      params.push(ts);
+    }
     params.push(id);
     this.db.prepare(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`).run(...params);
   }
@@ -603,7 +631,10 @@ export class Store {
     this.db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(ts, id);
   }
 
-  private applyCited(id: string, p: Record<string, unknown>, add: boolean): void {
+  // Both bump updated_at HERE, not in the calling write method: what an
+  // apply function skips, rebuild() skips too, and the invariant breaks on
+  // exactly that skipped field (caught live during the H-672 migration).
+  private applyCited(ts: string, id: string, p: Record<string, unknown>, add: boolean): void {
     if (add) {
       this.db
         .prepare('INSERT INTO citations (project_id, objective_id, claim) VALUES (?, ?, ?) ON CONFLICT(project_id, objective_id) DO UPDATE SET claim = excluded.claim')
@@ -611,18 +642,22 @@ export class Store {
     } else {
       this.db.prepare('DELETE FROM citations WHERE project_id = ? AND objective_id = ?').run(id, p['objective_id']);
     }
+    this.db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(ts, id);
   }
 
-  private applyLinked(fromId: string, toId: string, type: DepType, add: boolean): void {
+  private applyLinked(ts: string, fromId: string, toId: string, type: DepType, add: boolean): void {
     if (add) {
       this.db.prepare('INSERT OR IGNORE INTO deps (from_id, to_id, type) VALUES (?, ?, ?)').run(fromId, toId, type);
     } else {
       this.db.prepare('DELETE FROM deps WHERE from_id = ? AND to_id = ? AND type = ?').run(fromId, toId, type);
     }
+    this.db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(ts, fromId);
   }
 
   private applyShipNext(ts: string, id: string, payload: Record<string, unknown>): void {
-    const demoted = payload['demoted'] as string | null;
+    // 'demoted' only appears in pre-v2 events, from when exactly one project
+    // could hold ship_next; replaying them must reproduce the old effect.
+    const demoted = payload['demoted'] as string | null | undefined;
     if (demoted) this.db.prepare("UPDATE projects SET status = 'ready', updated_at = ? WHERE id = ?").run(ts, demoted);
     this.db.prepare("UPDATE projects SET status = 'ship_next', updated_at = ? WHERE id = ?").run(ts, id);
   }

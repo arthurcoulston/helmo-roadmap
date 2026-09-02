@@ -88,7 +88,7 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
     'roadmap_list_projects',
     {
       description:
-        `The roadmap in derived rank order. Rank is never set by hand: facts (ship_next, in motion, ready, shaping, blocked, parked) set the tier; judgments (cited objective rank, latest value claim, effort) order within it; every row carries a one-line explanation of its position. Terminal projects (shipped/abandoned) are excluded unless you filter for them by status.\n\n` +
+        `The roadmap in derived rank order. Rank is never set by hand: facts (ship_next, ready, shaping, blocked, parked) set the tier; judgments (cited objective rank, latest value claim, effort) order within it; every row carries a one-line explanation of its position. Shipped and archived projects are excluded unless you filter for them by status; the response's ship_next array is the current work phase — every project the human has declared go on, and a growing array is a problem to surface, not a neutral fact.\n\n` +
         `The response also carries the charter projection (objectives by the human's rank, and bets) so fit can be assessed without a second call. A project marked "advances nothing stated" is a signal worth reading, not an error — some work is maintenance; the visibility is the point.`,
       inputSchema: {
         status: z.enum(STATUSES).optional().describe('Filter to one status; terminal statuses are only visible this way'),
@@ -97,14 +97,15 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
     },
     async ({ status, limit }) => {
       try {
-        if (status === 'shipped' || status === 'abandoned') {
-          // Terminal projects have no rank; a plain listing serves the archive.
+        if (status === 'shipped_watching' || status === 'shipped_stable' || status === 'archived') {
+          // Off the ranked list; a plain listing serves the shelf and the archive.
           const rows = (store.dumpState()['projects'] as Project[]).filter((p) => p.status === status).slice(0, limit ?? 50);
           return ok({ projects: rows.map(compact), count: rows.length });
         }
         let ranked = store.rankProjects();
         if (status) ranked = ranked.filter((r) => r.project.status === status);
         ranked = ranked.slice(0, limit ?? 50);
+        const watching = (store.dumpState()['projects'] as Project[]).filter((p) => p.status === 'shipped_watching');
         return ok({
           projects: ranked.map((r) => ({
             ...compact(r.project),
@@ -115,7 +116,8 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
           count: ranked.length,
           objectives: store.listObjectives().map((o) => ({ id: o.id, rank: o.rank, horizon: o.horizon, statement: o.statement })),
           bets: store.listBets().map((b) => ({ id: b.id, statement: b.statement, stake: b.stake, falsifier: b.falsifier })),
-          ship_next: store.shipNext()?.id ?? null,
+          ship_next: store.shipNextProjects().map((p) => p.id),
+          ...(watching.length ? { shipped_watching: watching.map((p) => p.id) } : {}),
         });
       } catch (e) {
         return fail(e);
@@ -127,12 +129,12 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
     'roadmap_update_project',
     {
       description:
-        `Record a change to a project: shaping the description, moving it along the ladder (parked · shaping · ready · shipping · shipped/abandoned), parking it with an exit condition. Every call requires a 'note' — one or two lines, human terms; notes are the story the human reads.\n\n` +
-        `Status rules the store enforces: ship_next is NEVER set here (roadmap_set_ship_next records that human decision). 'ready' is a handoff test — the description is complete enough that a builder could break it into tickets without asking the human anything — and the agent declaring it must not be the one who last shaped the description: a second pair of eyes reads it and asserts the test passes. When parking, record unpark_condition ("revisit when Helmo has one external user") so a sweep can retest the condition instead of the idea rotting silently. Terminal statuses (shipped/abandoned) are permanent; a revived idea is a new project with a 'relates' link.`,
+        `Record a change to a project: shaping the description, moving it along the ladder (parked · shaping · ready · ship_next · shipped_watching · shipped_stable · archived), parking it with an exit condition. Every call requires a 'note' — one or two lines, human terms; notes are the story the human reads.\n\n` +
+        `Status rules the store enforces: ship_next is NEVER set here (roadmap_set_ship_next records that human go-ahead), and the shipped statuses are reachable only from ship_next — nothing ships that the human never declared go on. 'ready' is a handoff test — the description is complete enough that a builder could break it into tickets without asking the human anything — and the agent declaring it must not be the one who last shaped the description: a second pair of eyes reads it and asserts the test passes. 'shipped_watching' means newly shipped: monitoring, feedback, bug fixes, loose ends. 'shipped_stable' records a standing human decision that the maintenance is worth it — move a project there only when that decision has been stated. When parking, record unpark_condition ("revisit when Helmo has one external user") so a sweep can retest the condition instead of the idea rotting silently. 'archived' is terminal and permanent — the project ran its course and no longer earns its maintenance, all surfaces closed/taken down (ideas killed before shipping land here too); a revived idea is a new project with a 'relates' link.`,
       inputSchema: {
         project_id: z.string(),
         note: z.string(),
-        status: z.enum(['parked', 'shaping', 'ready', 'shipping', 'shipped', 'abandoned']).optional(),
+        status: z.enum(['parked', 'shaping', 'ready', 'shipped_watching', 'shipped_stable', 'archived']).optional(),
         title: z.string().optional(),
         body: z.string().optional().describe('The project description accretes and gets rewritten over months — keep it the document a builder would work from'),
         parked_reason: z.string().optional(),
@@ -224,8 +226,8 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
     'roadmap_set_ship_next',
     {
       description:
-        `Record the human's ship-next decision. There is exactly one ship_next — the instant there are three it is priority 1 again in a louder font — and it is ALWAYS the human's call: this tool exists for an agent to record a decision the human stated explicitly, with decided_by naming them and reason carrying their one-line why. Never call it on your own judgment, however ready a project looks. Only a 'ready' project can be declared; any current ship_next steps back to ready in the same event.\n\n` +
-        `In v1 ship_next is disclosure to the fleet (it rides Helmo's standing notice), not tasking: seeing it does not authorize starting the work. Building begins when the project is broken into Helmo tickets and those enter the ready queue like any other work.`,
+        `Record the human's go-ahead moving a ready project into ship_next — the work phase. This is ALWAYS the human's call: the tool exists for an agent to record a decision the human stated explicitly, with decided_by naming them and reason carrying their one-line why. Never call it on your own judgment, however ready a project looks. Only a 'ready' project can be declared.\n\n` +
+        `Several projects may hold ship_next at once, but with resistance: the response carries the resulting count, and a growing work phase is a problem to surface to the human, not a neutral fact — the standing aim is getting projects OFF it (to shipped_watching) when they are close. ship_next is disclosure to the fleet (it rides Helmo's standing notice), not tasking: seeing it does not authorize starting the work. Building begins when the project is broken into Helmo tickets and those enter the ready queue like any other work.`,
       inputSchema: {
         project_id: z.string(),
         decided_by: z.string().describe('The human who made the call'),
@@ -235,8 +237,12 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
     },
     async ({ actor, ...input }) => {
       try {
-        const p = store.setShipNext(resolveActor(actor as Actor | undefined), input);
-        return ok({ project: compact(p), note: 'If Helmo carries the standing notice, update it now (helmo_set_notice) so the fleet sees the change on its next queue read.' });
+        const { project, ship_next_count } = store.setShipNext(resolveActor(actor as Actor | undefined), input);
+        const notes = ['If Helmo carries the standing notice, update it now (helmo_set_notice) so the fleet sees the change on its next queue read.'];
+        if (ship_next_count >= 3) {
+          notes.push(`ship_next now holds ${ship_next_count} projects — a growing work phase is a problem. Tell the human, and look for the ones close enough to move to shipped_watching.`);
+        }
+        return ok({ project: compact(project), ship_next_count, note: notes.join(' ') });
       } catch (e) {
         return fail(e);
       }

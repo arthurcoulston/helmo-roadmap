@@ -11,15 +11,23 @@ append-only event log, materialized state, `.immediate()` write transactions
 
 - `store.ts` — SQLite store (better-sqlite3): projects, deps, claims,
   citations, objectives, bets, all materialized from an append-only event
-  log (`rebuild()` is the invariant, tests enforce it). Derived rank:
-  facts set the tier (ship_next · shipping · ready · shaping · blocked ·
+  log (`rebuild()` is the invariant, tests enforce it — every side effect
+  of a write lives in an apply* function, or replay silently diverges).
+  Derived rank: facts set the tier (ship_next · ready · shaping · blocked ·
   parked), judgments order within it (best cited objective rank, latest
-  value claim, effort), every rank carries a one-line explanation. Rules
-  the store enforces, not just the docs: judgments never land without a
-  reason; 'ready' needs an agent other than the last shaper (the human is
-  never gated); ship_next only via `setShipNext` with `decided_by` — exactly
-  one, the previous holder steps back to ready; terminal is permanent;
-  actuals are absolute rollups recorded from Helmo's meter, never deltas.
+  value claim, effort), every rank carries a one-line explanation; shipped
+  and archived projects are off the ranked list. Rules the store enforces,
+  not just the docs: judgments never land without a reason; 'ready' needs
+  an agent other than the last shaper (the human is never gated); ship_next
+  — the work phase, ladder v2 (H-672) — only via `setShipNext` with
+  `decided_by`, several may hold it and the returned count is the
+  resistance signal; the shipped statuses (shipped_watching,
+  shipped_stable) are reachable only from ship_next, so nothing ships
+  without the human's go; archived is the one terminal status and is
+  permanent; actuals are absolute rollups recorded from Helmo's meter,
+  never deltas. Pre-v2 events ('shipping'/'shipped'/'abandoned' statuses,
+  ship_next 'demoted' payloads) still replay correctly — never strip that
+  handling.
 - `tools.ts` — the 10-tool MCP surface, descriptions are
   guidance-as-deployed (Helmo's rule). v1 postures baked into them:
   ship_next is FYI to the fleet, not tasking; the charter is derived from
