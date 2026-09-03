@@ -7,9 +7,10 @@ import { mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { AVATAR_MARKS, ESTATE_AVATARS } from './estate-avatars.generated.js';
 import { ESTATE_TOKENS } from './estate-tokens.generated.js';
 import { Store } from './store.js';
-import { Claim, Project, Ranked, RoadmapEvent } from './types.js';
+import { ActorKind, Claim, Project, Ranked, RoadmapEvent } from './types.js';
 
 const dbPath = process.env['ROADMAP_DB'] ?? join(homedir(), '.helmo-roadmap', 'roadmap.db');
 // The view may be the first thing to touch a fresh store — don't crash on a
@@ -33,10 +34,51 @@ function rel(iso: string): string {
   return d < 14 ? `${d}d ago` : new Date(iso).toISOString().slice(0, 10);
 }
 
+// ---------- actors ----------
+
+// Kinds read from the record, rebuilt once per page render. Module-level for
+// the same reason `store` is: every renderer here is a free function, and
+// threading a map through all of them would be the only change of shape.
+let actorKinds = new Map<string, ActorKind>();
+
+const MARKS = new Set<string>(AVATAR_MARKS);
+
+/** An actor, drawn: the crew mark for their name, framed by the kind the
+ *  record holds, followed by the name itself.
+ *
+ *  THE NAME IS NOT OPTIONAL, and that is the point of having one function.
+ *  A crew hue is a retrieval accelerator, never an identifier — the estate
+ *  measured its own set and found ten members cannot have ten mutually
+ *  distinguishable hues (H-713), so a coloured dot standing alone would be
+ *  exactly the thing the measurement says does not work. Every mark on this
+ *  page comes from here, which is what makes "the name is always beside it"
+ *  a property of the code rather than a habit; test/estate-avatars.test.ts
+ *  holds the rest of the page to it.
+ *
+ *  A name with no mark and no recorded kind renders bare — a new agent, or a
+ *  name the roadmap has never seen write, is not a defect.
+ *
+ *  `known` is the kind the caller already has in hand: an event carries the
+ *  kind its writer declared at the time, which is better than the store-wide
+ *  answer this falls back to. Both are read from the record; neither is a
+ *  guess from the name. */
+function actor(name: string, known?: ActorKind): string {
+  const kind = known ?? actorKinds.get(name);
+  // `person` is the fallback for a human with no role mark; an agent with no
+  // mark gets none. Nothing here maps a member to a kind or invents a mark —
+  // both are read (estate DEV.md, "kind is read, never asserted").
+  const mark = MARKS.has(name) ? name : kind === 'human' && MARKS.has('person') ? 'person' : null;
+  const glyph =
+    mark && kind
+      ? `<svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><use href="#crew-${esc(mark)}-${esc(kind)}"/></svg>`
+      : '';
+  return `<span class="actor">${glyph}${esc(name)}</span>`;
+}
+
 function claimLine(c: Claim | null): string {
   if (!c) return '';
   const what = c.kind === 'value' ? `value ${c.level}` : `effort ${c.size}${c.predicted_usd ? ` ~$${c.predicted_usd}` : ''}`;
-  return `<span class="claim"><b>${esc(what)}</b> — ${esc(c.reason)} <span class="attr">(${esc(c.author)}, ${esc(rel(c.ts))})</span></span>`;
+  return `<span class="claim"><b>${esc(what)}</b> — ${esc(c.reason)} <span class="attr">(${actor(c.author)}, ${esc(rel(c.ts))})</span></span>`;
 }
 
 function money(p: Project, effort: Claim | null): string {
@@ -58,7 +100,7 @@ function timeline(events: RoadmapEvent[]): string {
       e.event_type === 'cited' ? `cited ${esc(e.payload['objective_id'])}` :
       e.event_type === 'actual_recorded' ? `metered $${e.payload['actual_usd']}` :
       e.event_type === 'updated' ? statusMove(e) : '';
-    return `<div class="tl"><span class="tl-when">${esc(rel(e.ts))}</span><span class="tl-who">${esc(e.actor.name)}</span>${
+    return `<div class="tl"><span class="tl-when">${esc(rel(e.ts))}</span><span class="tl-who">${actor(e.actor.name, e.actor.kind)}</span>${
       what ? `<span class="tl-what">${what}</span>` : ''
     }${note ? `<span class="tl-note">${esc(note)}</span>` : ''}</div>`;
   });
@@ -87,10 +129,16 @@ function details(r: Ranked): string {
 // The hero cards: the work phase — everything the human has declared go on.
 function shipNextCard(r: Ranked): string {
   const decision = [...store.getEvents(r.project.id)].reverse().find((e) => e.event_type === 'ship_next_set');
+  // `decided_by` is drawn as a human, and that is read from the record's own
+  // contract rather than guessed from the name: setShipNext refuses the write
+  // without one and calls it "the human who made the call" — entering the work
+  // phase is never an agent's judgment. Without this the most consequential
+  // attribution on the page falls back to the store-wide map and finds nothing,
+  // because Arthur never writes here himself; an orchestrator relays his call.
   return `<article class="hero-card" id="${esc(r.project.id)}">
     <header><span class="pid">${esc(r.project.id)}</span> <span class="htitle">${esc(r.project.title)}</span>
       <span class="meta">${money(r.project, r.effort)} · ${esc(rel(r.project.updated_at))}</span></header>
-    ${decision ? `<p class="decision"><span class="dmark">ship next</span> decided by <b>${esc(decision.payload['decided_by'])}</b>, ${esc(rel(decision.ts))} — ${esc(decision.payload['reason'])}</p>` : ''}
+    ${decision ? `<p class="decision"><span class="dmark">ship next</span> decided by <b>${actor(String(decision.payload['decided_by'] ?? ''), 'human')}</b>, ${esc(rel(decision.ts))} — ${esc(decision.payload['reason'])}</p>` : ''}
     ${r.project.body ? `<div class="body">${esc(r.project.body)}</div>` : ''}
     ${r.citations.map((c) => `<div class="cite"><span class="oid">${esc(c.objective_id)}</span> ${esc(c.claim)}</div>`).join('')}
     ${claimLine(r.value)}${claimLine(r.effort)}
@@ -152,6 +200,9 @@ function charterStrip(): string {
 }
 
 function page(): string {
+  // One query per render, not one per actor drawn: the map is store-wide
+  // and every renderer above reaches for it.
+  actorKinds = store.actorKinds();
   const ranked = store.rankProjects();
   const shipNext = ranked.filter((r) => r.project.status === 'ship_next');
   const rest = ranked.filter((r) => r.project.status !== 'ship_next');
@@ -169,6 +220,7 @@ function page(): string {
 <title>Roadmap</title>
 <style>${CSS}</style>
 <body>
+${ESTATE_AVATARS}
 <header class="top">
   <div class="brand"><h1>Roadmap</h1><span class="tagline">work worth doing · agents write, you read</span></div>
   <div class="stats">
@@ -294,6 +346,17 @@ details.more summary { font-size: 12px; color: var(--ink-3); cursor: pointer; }
 .tl-who { color: var(--link); font-weight: 600; margin-right: 8px; }
 .tl-what { color: var(--ink-3); font-style: italic; margin-right: 8px; }
 .tl-note { color: var(--ink-2); display: block; margin-top: 1px; }
+
+/* ---- actors (R-11 H-713): the mark says who, the frame says what kind ---- */
+/* nowrap is load-bearing, not tidiness: the rule the avatar set ships under is
+   that a crew hue never identifies a member on its own, and a mark that wrapped
+   to the end of a line away from its name would be doing exactly that. */
+.actor { white-space: nowrap; }
+/* Sized in em so one rule serves the 11.5px claim attribution and the 12.5px
+   timeline alike. No colour here — the mark carries its member hue from the
+   sprite, the frame is currentColor at .18, so an actor is whatever ink its
+   context gives it. */
+.mark { width: 1.15em; height: 1.15em; vertical-align: -0.22em; margin-right: 3px; }
 footer { margin-top: 48px; color: var(--ink-3); font-size: 11.5px; border-top: 1px solid var(--hairline); padding-top: 12px; }
 `;
 

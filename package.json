@@ -7,7 +7,8 @@
     "build": "tsc",
     "view": "tsx src/view.ts",
     "mcp": "tsx src/server.ts",
-    "vendor:tokens": "node scripts/vendor-estate-tokens.mjs"
+    "vendor:tokens": "node scripts/vendor-estate-tokens.mjs",
+    "vendor:avatars": "node scripts/vendor-estate-avatars.mjs"
   },
   "keywords": [
     "ai-agents",

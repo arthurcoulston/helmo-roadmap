@@ -45,8 +45,9 @@ append-only event log, materialized state, `.immediate()` write transactions
 ## Commands
 
 - `npm run build` (tsc → dist/), `npm test` (store suite against temp dbs).
-- `npm run vendor:tokens` refreshes the vendored estate design tokens; add
-  `-- --check` to fail on drift instead. See below.
+- `npm run vendor:tokens` / `npm run vendor:avatars` refresh the vendored
+  estate design tokens and crew avatar sprite; add `-- --check` to fail on
+  drift instead. See below.
 - View: `node dist/view.js`; restart after rebuilding.
 
 ## The estate design tokens (R-11 H-714)
@@ -95,6 +96,44 @@ CSS: the property ends up with no value, every rule using it is dropped, and
 nothing goes red — the page just quietly loses all its borders. It shipped that
 way for one render and only a pixel sample caught it. `test/estate-tokens.test.ts`
 now asserts no seam alias resolves to itself, in this repo and in Helmo.
+
+## The estate crew avatars (R-11 H-714)
+
+`src/estate-avatars.generated.ts` is the estate's `avatars/crew-avatars.svg`,
+vendored on the same seam and for the same reason as the tokens: a copy, not an
+import, because the roadmap is published standalone. The sprite is inlined into
+the page body — cross-document `<use>` is not what this page does — and drawn
+with `<use href="#crew-<mark>-<kind>">`. No colour travels with it: a mark is
+`currentColor` over `var(--crew-<name>)`, which the token copy already defines,
+so the two vendored files interlock and neither carries a value the other owns.
+
+**Everything here fails silently.** A `<use>` at a missing symbol draws nothing
+— no console error, no failed request, 200 on the page — so the checks in
+`test/estate-avatars.test.ts` are all aimed at that one shape. The vendor script
+derives its index by reading the sprite rather than declaring one, refuses a
+sprite with no composed symbols, and refuses a ragged one (every mark must exist
+at every kind, because the view names `crew-${mark}-${kind}` from a record it
+did not choose). Recognise a composed symbol by its *body* — it `<use>`s a
+`#crew-frame-*` — because `crew-frame-agent` matches the id shape exactly and is
+not a mark.
+
+**Kind is read, never asserted.** `Store.actorKinds()` answers with the kind
+each name last wrote under, store-wide, one query per render; an event passes
+the kind it recorded itself, which is better. A name the roadmap has never seen
+write renders as bare text — a new agent is not a defect.
+
+The one place a kind is passed rather than looked up is the ship-next decider,
+and that is still read from the record: `setShipNext` refuses a write with no
+`decided_by` and calls it "the human who made the call", so the schema is the
+source. Without it the most consequential attribution on the page would render
+bare, because Arthur never writes here himself — an orchestrator relays his call.
+
+**A mark never stands without its name** (H-713 measured that ten members cannot
+have ten mutually distinguishable hues, so a hue accelerates retrieval and never
+identifies). That is structural: exactly one function draws a mark and it takes
+the name it prints, the test asserts `view.ts` holds a single `#crew-`
+reference beside `esc(name)`, and `.actor { white-space: nowrap }` keeps the two
+on the same line.
 
 ## The Helmo seam
 

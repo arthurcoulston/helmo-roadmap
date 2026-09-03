@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import {
-  Actor, Bet, Citation, Claim, Dep, DepType, EFFORT_SIZES, Horizon, Objective,
+  ACTOR_KINDS, Actor, ActorKind, Bet, Citation, Claim, Dep, DepType, EFFORT_SIZES, Horizon, Objective,
   Project, Ranked, RoadmapError, RoadmapEvent, SHIPPED, Status, TERMINAL, VALUE_LEVELS,
 } from './types.js';
 
@@ -162,6 +162,31 @@ export class Store {
   getEvents(subjectId: string): RoadmapEvent[] {
     const rows = this.db.prepare('SELECT * FROM events WHERE subject_id = ? ORDER BY seq').all(subjectId) as Record<string, unknown>[];
     return rows.map(rowToEvent);
+  }
+
+  /** The kind each name last wrote under, store-wide (R-11 H-714).
+   *
+   *  The view draws an actor's frame from their kind, and a claim's author or a
+   *  ship-next decider arrives as a bare name — the payload records who decided,
+   *  not what they are. This answers from the record rather than mapping a name
+   *  to a kind: whatever mason last wrote as is what mason is drawn as. An event
+   *  that carries its own actor is better still, and the view prefers it.
+   *
+   *  A name that has never written is absent, and the view renders it as plain
+   *  text. One query, one map, once per render. */
+  actorKinds(): Map<string, ActorKind> {
+    const rows = this.db
+      .prepare(
+        `SELECT json_extract(actor, '$.name') AS name, json_extract(actor, '$.kind') AS kind
+           FROM events WHERE seq IN (SELECT MAX(seq) FROM events GROUP BY json_extract(actor, '$.name'))`,
+      )
+      .all() as { name: string | null; kind: string | null }[];
+    const kinds = new Map<string, ActorKind>();
+    for (const r of rows) {
+      if (!r.name || !r.kind) continue;
+      if ((ACTOR_KINDS as readonly string[]).includes(r.kind)) kinds.set(r.name, r.kind as ActorKind);
+    }
+    return kinds;
   }
 
   getClaims(projectId: string): Claim[] {
