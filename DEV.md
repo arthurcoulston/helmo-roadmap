@@ -45,7 +45,51 @@ append-only event log, materialized state, `.immediate()` write transactions
 ## Commands
 
 - `npm run build` (tsc → dist/), `npm test` (store suite against temp dbs).
+- `npm run vendor:tokens` refreshes the vendored estate design tokens; add
+  `-- --check` to fail on drift instead. See below.
 - View: `node dist/view.js`; restart after rebuilding.
+
+## The estate design tokens (R-11 H-714)
+
+`src/estate-tokens.generated.ts` is a **vendored copy** of the estate shell's
+`tokens/estate-tokens.css` — the source of the visual system every estate
+surface shares. `scripts/vendor-estate-tokens.mjs` refreshes it (also
+`--check`); `test/estate-tokens.test.ts` fails on drift.
+
+Vendoring, not importing, is the point: the roadmap is published standalone, so
+a clone with no estate checkout beside it must build and run unchanged. That is
+also why the drift test uses `it.skipIf` rather than an early return — with no
+source to compare against it reports **skipped**, which is visible in the run
+summary, where a `console.log` from a passing test is not.
+
+**What was adopted, and what was not.** `view.ts` keeps every one of its own
+token names and not one of its rules changed in meaning; the aliases at the top
+of `CSS` are the whole seam, so a look ratified upstream restyles this page
+without it being touched. Adopted: surfaces (`--page`, `--surface`), the ink
+ladder, `--hairline`, and the radius ramp (`--radius-card` / `-inner` are the
+estate's `--radius` × 1 / 0.8). The middle ink is mixed from the estate's two,
+since shadcn has no third step.
+
+Not adopted, deliberately: the status colours and the interactive `--link`
+blue. shadcn's neutral base ships no status ramp, and its own `--accent` is a
+hover *surface*, not an interactive colour. The one place that `--accent` does
+belong is `.prow summary:hover`, which is exactly a hover surface — and it has
+to be that rather than `--surface`, because `--card` and `--background` are the
+same white in the light palette, so a `--surface` hover would be no hover at
+all.
+
+Two collisions had to be resolved, because the vendored file lands on `:root`
+ahead of the roadmap's own block: `--muted` and `--accent` exist in both with
+*different meanings* (surface vs text; hover surface vs link). The roadmap's
+are now `--ink-3` and `--link`. Its `--border` folded into `--hairline` — the
+estate has one border token and the two resolved to it.
+
+**One trap, learned the hard way here.** An alias that comes out
+self-referential (`--hairline: var(--hairline)`) is *guaranteed-invalid* in
+CSS: the property ends up with no value, every rule using it is dropped, and
+nothing goes red — the page just quietly loses all its borders. It shipped that
+way for one render and only a pixel sample caught it. `test/estate-tokens.test.ts`
+now asserts no seam alias resolves to itself, in this repo and in Helmo.
 
 ## The Helmo seam
 

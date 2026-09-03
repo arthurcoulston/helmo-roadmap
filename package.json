@@ -6,7 +6,8 @@
     "test": "vitest run",
     "build": "tsc",
     "view": "tsx src/view.ts",
-    "mcp": "tsx src/server.ts"
+    "mcp": "tsx src/server.ts",
+    "vendor:tokens": "node scripts/vendor-estate-tokens.mjs"
   },
   "keywords": [
     "ai-agents",

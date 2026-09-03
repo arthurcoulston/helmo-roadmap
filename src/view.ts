@@ -7,6 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { ESTATE_TOKENS } from './estate-tokens.generated.js';
 import { Store } from './store.js';
 import { Claim, Project, Ranked, RoadmapEvent } from './types.js';
 
@@ -197,43 +198,64 @@ ${archived.length ? `<section><h2>Archived (${archived.length})</h2>${archived.m
 </body></html>`;
 }
 
+// Chrome, ink and shape come from the estate's design tokens, vendored
+// (R-11 H-714): one visual system across Helmo, the roadmap, rev, the health
+// page and the estate shell. The roadmap keeps its own token names and every
+// rule below is unchanged — the aliases are the whole seam, so a look ratified
+// upstream restyles this page without it being touched. Status colours stay the
+// roadmap's own and the block below says why.
+//
+// ESTATE_TOKENS goes first: the aliases read from it, and it brings the dark
+// values under prefers-color-scheme, which is what a page with no theme
+// switch needs.
 const CSS = `
+${ESTATE_TOKENS}
 :root {
   color-scheme: light dark;
-  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
-  --hairline: #e1e0d9; --border: rgba(11,11,11,0.10);
-  --good-text: #006300; --warning: #fab219; --serious: #ec835a; --accent: #2a78d6;
+  --page: var(--background); --surface: var(--card); --ink: var(--foreground);
+  /* The roadmap runs a three-step ink ladder where shadcn has two; the middle
+     step is mixed rather than picked, so a look change carries it too. */
+  --ink-2: color-mix(in oklab, var(--foreground) 72%, var(--background));
+  --ink-3: var(--muted-foreground);
+  --hairline: var(--border);
+  --radius-card: var(--radius); --radius-inner: calc(var(--radius) * 0.8);
+
+  /* Not adopted, deliberately. shadcn's neutral base ships no status ramp, and
+     its own --accent is a hover SURFACE, not an interactive colour — mapping
+     onto either would be translation, not adoption. These follow the reference
+     palette (dataviz skill) and always ride with a text label, never colour
+     alone. Whether the estate gets a status ramp and an interactive hue of its
+     own is the palette question on H-714, not this file's. */
+  --good-text: #006300; --serious: #ec835a; --link: #2a78d6;
 }
 @media (prefers-color-scheme: dark) { :root {
-  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
-  --hairline: #2c2c2a; --border: rgba(255,255,255,0.10);
-  --good-text: #0ca30c; --accent: #3987e5;
+  --good-text: #0ca30c; --link: #3987e5;
 } }
 * { box-sizing: border-box; }
 body { margin: 0 auto; padding: 28px 32px 64px; max-width: 1080px; background: var(--page); color: var(--ink);
   font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 8px; }
 .brand h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; display: inline; }
-.tagline { color: var(--muted); margin-left: 10px; font-size: 13px; }
+.tagline { color: var(--ink-3); margin-left: 10px; font-size: 13px; }
 .stats { display: flex; gap: 22px; }
 .stat-n { font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
 .stat-n.alarm { color: var(--serious); }
 .alarm-note { color: var(--serious); font-size: 12.5px; margin: 4px 0 8px; }
-.stat-l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); font-weight: 600;
+.stat-l { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--ink-3); font-weight: 600;
   margin: 34px 0 10px; padding-top: 14px; border-top: 1px solid var(--hairline); }
-.allclear { color: var(--muted); font-size: 14px; }
-.pid, .oid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); white-space: nowrap; }
-.spend { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+.allclear { color: var(--ink-3); font-size: 14px; }
+.pid, .oid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.spend { font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--hairline); white-space: nowrap; }
 .badge.serious { color: var(--serious); }
-.badge.quiet { color: var(--muted); }
-.meta, .rmeta { color: var(--muted); font-size: 12px; }
-.attr { color: var(--muted); font-size: 11.5px; }
+.badge.quiet { color: var(--ink-3); }
+.meta, .rmeta { color: var(--ink-3); font-size: 12px; }
+.attr { color: var(--ink-3); font-size: 11.5px; }
 
 /* ---- ship-next hero ---- */
-.hero-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--good-text);
-  border-radius: 10px; padding: 18px 22px; margin: 12px 0; }
+.hero-card { background: var(--surface); border: 1px solid var(--hairline); border-left: 3px solid var(--good-text);
+  border-radius: var(--radius-card); padding: 18px 22px; margin: 12px 0; }
 .hero-card header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .htitle { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
 .decision { margin: 10px 0 6px; color: var(--ink-2); }
@@ -241,36 +263,40 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em; color: 
 
 /* ---- charter ---- */
 .charter .citem { margin: 3px 0; font-size: 13px; color: var(--ink-2); }
-.crank { color: var(--accent); font-weight: 650; font-size: 12px; margin: 0 6px 0 8px; }
+.crank { color: var(--link); font-weight: 650; font-size: 12px; margin: 0 6px 0 8px; }
 .cstate { color: var(--ink); }
 
 /* ---- ranked rows ---- */
 .prow { border-bottom: 1px solid var(--hairline); }
 .prow summary { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 9px 4px; cursor: pointer; list-style: none; }
 .prow summary::-webkit-details-marker { display: none; }
-.prow summary:hover { background: var(--surface); }
-.rank { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; min-width: 20px; text-align: right; }
+/* The one place the estate's --accent belongs: it is a hover SURFACE in
+   shadcn's vocabulary, which is exactly this row's job. Aliasing it here rather
+   than to --surface matters — --card and --background are the same white in
+   the light palette, so a --surface hover would be no hover at all. */
+.prow summary:hover { background: var(--accent); }
+.rank { font-variant-numeric: tabular-nums; color: var(--ink-3); font-size: 12px; min-width: 20px; text-align: right; }
 .rtitle { font-weight: 500; }
 .rmeta { margin-left: auto; text-align: right; }
-.explain { flex-basis: 100%; color: var(--muted); font-size: 12px; padding-left: 30px; }
+.explain { flex-basis: 100%; color: var(--ink-3); font-size: 12px; padding-left: 30px; }
 
 /* ---- shared detail ---- */
 details.more { margin-top: 10px; }
 details.more summary, .prow > summary { font-size: 13.5px; }
-details.more summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+details.more summary { font-size: 12px; color: var(--ink-3); cursor: pointer; }
 .body { white-space: pre-wrap; color: var(--ink-2); font-size: 13px; background: var(--page);
-  border: 1px solid var(--hairline); border-radius: 8px; padding: 10px 14px; margin: 8px 0; }
+  border: 1px solid var(--hairline); border-radius: var(--radius-inner); padding: 10px 14px; margin: 8px 0; }
 .prow .body { background: var(--surface); }
 .park { color: var(--ink-2); font-size: 12.5px; margin: 4px 0; }
 .cite { font-size: 12.5px; color: var(--ink-2); margin: 3px 0; }
 .claim { display: block; font-size: 12.5px; color: var(--ink-2); margin: 3px 0; }
 .tl-wrap { margin: 10px 0 4px; border-left: 2px solid var(--hairline); padding-left: 14px; }
 .tl { margin: 7px 0; font-size: 12.5px; }
-.tl-when { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
-.tl-who { color: var(--accent); font-weight: 600; margin-right: 8px; }
-.tl-what { color: var(--muted); font-style: italic; margin-right: 8px; }
+.tl-when { color: var(--ink-3); margin-right: 8px; font-variant-numeric: tabular-nums; }
+.tl-who { color: var(--link); font-weight: 600; margin-right: 8px; }
+.tl-what { color: var(--ink-3); font-style: italic; margin-right: 8px; }
 .tl-note { color: var(--ink-2); display: block; margin-top: 1px; }
-footer { margin-top: 48px; color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--hairline); padding-top: 12px; }
+footer { margin-top: 48px; color: var(--ink-3); font-size: 11.5px; border-top: 1px solid var(--hairline); padding-top: 12px; }
 `;
 
 // Refresh by replacement, preserving scroll and open disclosures.
