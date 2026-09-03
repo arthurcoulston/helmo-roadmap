@@ -220,17 +220,15 @@ ${ESTATE_TOKENS}
   --hairline: var(--border);
   --radius-card: var(--radius); --radius-inner: calc(var(--radius) * 0.8);
 
-  /* Not adopted, deliberately. shadcn's neutral base ships no status ramp, and
-     its own --accent is a hover SURFACE, not an interactive colour — mapping
-     onto either would be translation, not adoption. These follow the reference
-     palette (dataviz skill) and always ride with a text label, never colour
-     alone. Whether the estate gets a status ramp and an interactive hue of its
-     own is the palette question on H-714, not this file's. */
-  --good-text: #006300; --serious: #ec835a; --link: #2a78d6;
+  /* Status and link were the one part of this page shadcn had nothing for, so
+     they were held back as literals until the estate grew a ramp of its own
+     (H-771). Now they alias like everything else, and the dark overrides are
+     gone because the ramp is themed. --serious moves: it was #ec835a, which is
+     2.64:1 on white — a chart mark in the reference palette, not text, and
+     this page renders it as an alarm note and a badge. It takes the estate's
+     deepened light step. Colour still always rides with a text label. */
+  --good-text: var(--status-good); --serious: var(--status-serious); --link: var(--interactive);
 }
-@media (prefers-color-scheme: dark) { :root {
-  --good-text: #0ca30c; --link: #3987e5;
-} }
 * { box-sizing: border-box; }
 body { margin: 0 auto; padding: 28px 32px 64px; max-width: 1080px; background: var(--page); color: var(--ink);
   font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
