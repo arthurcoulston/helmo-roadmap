@@ -70,9 +70,14 @@ ladder, `--hairline`, and the radius ramp (`--radius-card` / `-inner` are the
 estate's `--radius` × 1 / 0.8). The middle ink is mixed from the estate's two,
 since shadcn has no third step.
 
-Not adopted, deliberately: the status colours and the interactive `--link`
-blue. shadcn's neutral base ships no status ramp, and its own `--accent` is a
-hover *surface*, not an interactive colour. The one place that `--accent` does
+Status colours and the interactive `--link` blue were held back at first —
+shadcn's neutral base ships no status ramp. The estate grew both of its own in
+H-771, so they alias like everything else now and the dark overrides for them
+are gone: the estate's ramp is themed. `--serious` moved in that swap, from
+`#ec835a` (2.64:1 on white — a chart mark in the reference palette, and this
+page renders it as an alarm note and a badge) to the estate's deepened light
+step. Its own `--accent` is still a hover *surface*, not an interactive colour,
+and the one place that `--accent` does
 belong is `.prow summary:hover`, which is exactly a hover surface — and it has
 to be that rather than `--surface`, because `--card` and `--background` are the
 same white in the light palette, so a `--surface` hover would be no hover at
