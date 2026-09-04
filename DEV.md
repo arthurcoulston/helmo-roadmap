@@ -1,5 +1,10 @@
 # DEV — coding context for helmo-roadmap
 
+**Stage: MVP** (recorded in the R-11/R-5 completion pass, H-916). Publication
+readiness is a separate obligation: the privacy/history, disclosure and cold
+setup gates apply before release even while this remains MVP. No 1.0 or Scale
+promotion is implied. `README.md` names the current floor and prerequisites.
+
 The layer above the ticket: Helmo records work being done, this records work
 worth doing — parked, shaped, ranked, declared go. Product intent and the
 full design: `PRODUCT.md`; the charter template ships with the product

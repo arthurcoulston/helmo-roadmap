@@ -13,13 +13,20 @@ with the product is [CHARTER-TEMPLATE.md](CHARTER-TEMPLATE.md).
 
 ## Run
 
-- `npm install && npm run build`
+Requires Node.js and npm. No Helmo server, Crew checkout, or Estate checkout
+is needed to run this product. The SQLite dependency may need a native build
+toolchain when a prebuilt binary is unavailable for your Node/platform pair.
+
+- From a clean checkout: `npm ci && npm run build && npm test`.
 - MCP server (stdio): `node dist/server.js` — store at
   `~/.helmo-roadmap/roadmap.db` (`ROADMAP_DB` overrides); writer identity from
   `ROADMAP_ACTOR` or `HELMO_ACTOR` (JSON), or a per-call `actor` param.
 - Read-only view: `node dist/view.js` — `http://localhost:4410`
   (`ROADMAP_VIEW_PORT`).
-- `npm test`
+
+Tests use temporary stores. Two optional source-drift comparisons report
+**skipped** when the upstream Estate source is absent; the vendored tokens
+and avatars still build and render without it. Never point tests at a live DB.
 
 ## The shape
 
@@ -31,7 +38,18 @@ with the product is [CHARTER-TEMPLATE.md](CHARTER-TEMPLATE.md).
 - **Effort is predicted in dollars** and checked against the metered actual
   rolled up from the project's Helmo tickets — falling costs re-sort the list
   without anyone changing their mind about value.
-- **Exactly one ship_next**, and it is the human's recorded decision.
+- **Ship-next is the human's recorded decision.** Several projects may be
+  active together; the returned count makes that commitment visible.
 - **The charter is the one thing the human writes and agents only read** —
   the store holds a projection (objectives and bets) with provenance back to
   the human's own document.
+
+Current product stage: **MVP**. The version number is not a stage promotion.
+Build, store/replay tests, smoke of the read-only view, and the estate's
+mobile/desktop accessibility and layout checks form the current acceptance
+floor. Publication also requires the separate privacy/history and clean-setup
+review; 1.0 visual baselines and Scale operations are not claimed.
+
+The view is local and read-only. Back up the SQLite store before upgrades;
+keep backups private. See [SECURITY.md](SECURITY.md) for disclosure and
+[LICENSE](LICENSE) for the MIT terms.
