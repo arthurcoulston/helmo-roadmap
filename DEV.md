@@ -142,20 +142,20 @@ on the same line.
 
 ## The Helmo seam
 
-Three additions in the helmo repo (H-172), a public API commitment — resist
-widening: a `project` tag on tickets (the join key for rollups), a `project`
-filter on the ticket query, and the standing notice on queue responses
-(`helmo_set_notice`, human/orchestrator only). The roadmap holds no code
+Two additions in the helmo repo (H-172), a public API commitment — resist
+widening: a `project` tag on tickets (the join key for rollups) and a
+`project` filter on the ticket query. The third, the standing notice on queue
+responses, was retired in H-1126: Arthur's ruling is that the roadmap itself
+carries the shipping order, so a hand-maintained copy of it on every queue
+read only drifts. The roadmap holds no code
 path into Helmo: in v1 Bosun's sweep is the client — it reads metered
 cost from Helmo tickets tagged with the project id and records the rollup
 via `roadmap_record_actual`.
 
-The notice is the half of the seam an agent cannot close (H-324). Every
-`roadmap_set_ship_next` response says to update it, but `helmo_set_notice`
-takes human/orchestrator writes only and a loop signs as agent — so a
-declaration made from a loop leaves the notice stale until someone updates
-it beside the human. Bosun's sweep therefore *detects* the drift and says
-so; the correction is a desk-session act. Two caveats on the rollup itself:
+The notice used to be the half of the seam an agent could not close (H-324):
+a ship_next declared from a loop left a stale notice until a desk session
+corrected it. Retiring it (H-1126) removes that drift entirely — ship_next is
+read here, where it is written. Two caveats on the rollup itself:
 desk sessions are unmetered, so a human-heavy project rolls up $0 (record
 nothing rather than "cheap"), and list rows carry no cost, so the sum is one
 `helmo-cli get` per tagged ticket — cheap in one shell pass, but the reason

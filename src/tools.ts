@@ -227,7 +227,7 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
     {
       description:
         `Record the human's go-ahead moving a ready project into ship_next — the work phase. This is ALWAYS the human's call: the tool exists for an agent to record a decision the human stated explicitly, with decided_by naming them and reason carrying their one-line why. Never call it on your own judgment, however ready a project looks. Only a 'ready' project can be declared.\n\n` +
-        `Several projects may hold ship_next at once, but with resistance: the response carries the resulting count, and a growing work phase is a problem to surface to the human, not a neutral fact — the standing aim is getting projects OFF it (to shipped_watching) when they are close. ship_next is disclosure to the fleet (it rides Helmo's standing notice), not tasking: seeing it does not authorize starting the work. Building begins when the project is broken into Helmo tickets and those enter the ready queue like any other work.`,
+        `Several projects may hold ship_next at once, but with resistance: the response carries the resulting count, and a growing work phase is a problem to surface to the human, not a neutral fact — the standing aim is getting projects OFF it (to shipped_watching) when they are close. ship_next is disclosure — the human's current shipping order, readable here — not tasking: seeing it does not authorize starting the work. Building begins when the project is broken into Helmo tickets and those enter the ready queue like any other work.`,
       inputSchema: {
         project_id: z.string(),
         decided_by: z.string().describe('The human who made the call'),
@@ -238,11 +238,12 @@ export function buildServer(store: Store, envActor: Actor | null): McpServer {
     async ({ actor, ...input }) => {
       try {
         const { project, ship_next_count } = store.setShipNext(resolveActor(actor as Actor | undefined), input);
-        const notes = ['If Helmo carries the standing notice, update it now (helmo_set_notice) so the fleet sees the change on its next queue read.'];
-        if (ship_next_count >= 3) {
-          notes.push(`ship_next now holds ${ship_next_count} projects — a growing work phase is a problem. Tell the human, and look for the ones close enough to move to shipped_watching.`);
-        }
-        return ok({ project: compact(project), ship_next_count, note: notes.join(' ') });
+        // Crowding is the only thing worth saying back: until H-1126 this also
+        // told the caller to update Helmo's standing notice, which no longer exists.
+        const crowded = ship_next_count >= 3
+          ? `ship_next now holds ${ship_next_count} projects — a growing work phase is a problem. Tell the human, and look for the ones close enough to move to shipped_watching.`
+          : null;
+        return ok({ project: compact(project), ship_next_count, ...(crowded ? { note: crowded } : {}) });
       } catch (e) {
         return fail(e);
       }
