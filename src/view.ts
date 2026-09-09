@@ -282,6 +282,18 @@ ${ESTATE_TOKENS}
   --good-text: var(--status-good); --serious: var(--status-serious); --link: var(--interactive);
 }
 * { box-sizing: border-box; }
+/* Every string on this page came out of the store, and project bodies are full
+   of absolute paths, commit refs and URLs — tokens with no space to break at.
+   One of them in a phone-width column pushes the whole document sideways: this
+   page was 505px wide in a 390px viewport, and because the width belongs to a
+   text node rather than an element there was nothing to point at (R-11
+   H-1176). Declared once, at the root, rather than on each prose selector,
+   because the next surface that renders a body should not have to learn this.
+   Value anywhere rather than break-word: only anywhere also lowers
+   min-content, so a grid or flex track shrinks to its box instead of being
+   held open by the longest ref inside it. Anything that must stay on one line
+   says white-space: nowrap, and that still wins. */
+:root { overflow-wrap: anywhere; }
 body { margin: 0 auto; padding: 28px 32px 64px; max-width: 1080px; background: var(--page); color: var(--ink);
   font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 8px; }

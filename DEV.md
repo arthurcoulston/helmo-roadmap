@@ -55,6 +55,23 @@ append-only event log, materialized state, `.immediate()` write transactions
   drift instead. See below.
 - View: `node dist/view.js`; restart after rebuilding.
 
+## Phone width (R-11 H-1176)
+
+Everything this page renders is store text, and project bodies carry absolute
+paths, commit refs and URLs — tokens with no space to break at. One of them in
+a phone-width column laid out 433px wide in a 276px box and dragged the whole
+document to 505px in a 390px viewport. So `:root { overflow-wrap: anywhere; }`
+sits at the top of the stylesheet, declared once rather than on each prose
+selector, so the next surface that renders a body does not have to learn this.
+Anything that must stay on one line says `white-space: nowrap`, which still
+wins.
+
+`npm run smoke` in the **estate** repo is what caught it, and it is the better
+check — it drives this page live at 390px and 1280px in both themes, so run it
+after touching this file's HTML or CSS. But it can only see the defect while
+some project body happens to be carrying a long path, which is why
+`test/view-wrapping.test.ts` asserts the rule against the source as well.
+
 ## The estate design tokens (R-11 H-714)
 
 `src/estate-tokens.generated.ts` is a **vendored copy** of the estate shell's
