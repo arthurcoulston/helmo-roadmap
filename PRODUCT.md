@@ -1,7 +1,5 @@
 # Helmo Roadmap — Product Description
 
-*Working title. The name is deliberately unsettled; it is not a reason to wait.*
-
 Open source, self-hosted, agent-platform agnostic. A sibling to Helmo, not a
 part of it: the two are built to work as one system and to work alone.
 

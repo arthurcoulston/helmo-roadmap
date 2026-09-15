@@ -1,7 +1,5 @@
 # Helmo Roadmap
 
-*Working title — the name is deliberately unsettled.*
-
 The layer above the ticket. [Helmo](https://github.com/arthurcoulston/helmo)
 records work **being done**; this records work **worth doing** — where an idea
 gets parked, fleshed out, costed, ranked, and eventually declared go. Separate
