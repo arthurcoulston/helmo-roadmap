@@ -49,11 +49,19 @@ describe('projects', () => {
 });
 
 describe('the ready gate', () => {
-  it('the shaper cannot declare their own work ready', () => {
+  it('the description shaper cannot make their own commitment-readiness judgment', () => {
     const p = store.createProject(mason, { title: 'T', body: 'the full plan', status: 'shaping' });
     expect(() => store.updateProject(mason, { project_id: p.id, note: 'done shaping', status: 'ready' })).toThrow(/second pair of eyes|other than the shaper|shaped by you/);
-    // A different agent read it and asserts the handoff test passes.
-    const { project } = store.updateProject(bosun, { project_id: p.id, note: 'read it; a builder could ticket this unaided', status: 'ready' });
+    const { project } = store.updateProject(bosun, { project_id: p.id, note: 'enough is known to decide whether to commit', status: 'ready' });
+    expect(project.status).toBe('ready');
+  });
+
+  it('retitling is not shaping the description', () => {
+    const p = store.createProject(mason, { title: 'Working title', body: 'first sketch', status: 'shaping' });
+    store.updateProject(bosun, { project_id: p.id, note: 'shaped the proposition', body: 'enough evidence and scope to decide whether to commit' });
+    store.updateProject(mason, { project_id: p.id, note: 'settled the name', title: 'Final title' });
+
+    const { project } = store.updateProject(mason, { project_id: p.id, note: 'independently judged ready to commit', status: 'ready' });
     expect(project.status).toBe('ready');
   });
 

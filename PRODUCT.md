@@ -90,11 +90,12 @@ its definition until it can be scored and handed off well.
 **Blocked is not a status.** As in Helmo, it is computed from dependencies, not
 remembered by whoever touched the record last.
 
-**Ready is a handoff test, not a checkbox.** A project is ready when its
-description is complete enough that a builder agent could break it into tickets
-without asking the human anything. That is testable — and it is gated the way
-crew filings already are: an agent other than the one who shaped it must read
-it and assert the test passes.
+**Ready supports a commitment decision, not a finished specification.** A
+project is ready when enough is known for the human to make an informed decision
+about committing to it. Details continue to be decided while building; this is
+an agile threshold, not a promise that a builder will have no questions. An
+agent other than the one who shaped the description must make that readiness
+judgment, while retitling alone does not count as shaping.
 
 **Ship next is the work phase, entered only on the human's go-ahead.** Nothing
 is ever being shipped that the human did not declare go on — the store rejects

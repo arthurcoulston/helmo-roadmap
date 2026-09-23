@@ -361,13 +361,13 @@ export class Store {
           `${p.id} is ${p.status} — only a ship_next project can move to ${input.status}. Shipping starts with the human's go-ahead (roadmap_set_ship_next); work the list, don't skip the gate.`,
         );
       }
-      // Ready is a handoff test, gated by a second pair of eyes: the actor
+      // Ready is an independent commitment-readiness judgment: the actor
       // declaring it must not be the last one who shaped the description.
       if (input.status === 'ready' && actor.kind === 'agent') {
         const shaper = this.lastShaper(p.id);
         if (shaper === actor.name) {
           throw new RoadmapError(
-            `${p.id} was last shaped by you — the ready test ("a builder could break this into tickets without asking the human anything") needs an agent other than the shaper to read it and assert it passes. Leave it shaping; another agent or the human can declare it ready.`,
+            `${p.id} was last shaped by you — deciding that enough is known to make an informed commitment needs an agent other than the description's shaper. Leave it shaping; another agent or the human can declare it ready.`,
           );
         }
       }
@@ -393,14 +393,14 @@ export class Store {
     }).immediate();
   }
 
-  /** The actor who last wrote this project's title or body — the shaper the
-   *  ready gate must exclude. */
+  /** The actor who last wrote this project's description — the shaper the
+   *  ready gate must exclude. A retitle does not reshape the project. */
   private lastShaper(id: string): string | null {
     const row = this.db
       .prepare(
         `SELECT json_extract(actor, '$.name') AS name FROM events
          WHERE subject_id = ? AND (event_type = 'created'
-           OR (event_type = 'updated' AND (json_extract(payload, '$.diffs.body') IS NOT NULL OR json_extract(payload, '$.diffs.title') IS NOT NULL)))
+           OR (event_type = 'updated' AND json_extract(payload, '$.diffs.body') IS NOT NULL))
          ORDER BY seq DESC LIMIT 1`,
       )
       .get(id) as { name: string | null } | undefined;
@@ -491,7 +491,7 @@ export class Store {
     // 'shipping' is the pre-v2 name for the work phase; those rows re-enter
     // through this same human-gated door during migration (H-672).
     if (p.status !== 'ready' && (p.status as string) !== 'shipping') {
-      throw new RoadmapError(`${p.id} is ${p.status} — only a ready project can be declared ship_next. The ready gate is what makes "go" mean a builder can start.`);
+      throw new RoadmapError(`${p.id} is ${p.status} — only a ready project can be declared ship_next. Ready means enough is known for the human to make an informed commitment.`);
     }
     rejectSwallowedMarkup({ reason: input.reason });
     return this.db.transaction(() => {

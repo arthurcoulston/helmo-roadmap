@@ -22,8 +22,10 @@ append-only event log, materialized state, `.immediate()` write transactions
   parked), judgments order within it (best cited objective rank, latest
   value claim, effort), every rank carries a one-line explanation; shipped
   and archived projects are off the ranked list. Rules the store enforces,
-  not just the docs: judgments never land without a reason; 'ready' needs
-  an agent other than the last shaper (the human is never gated); ship_next
+  not just the docs: judgments never land without a reason; 'ready' means
+  enough is known for an informed commitment and needs an agent other than
+  the last description shaper (the human is never gated; retitling is not
+  shaping); ship_next
   — the work phase, ladder v2 (H-672) — only via `setShipNext` with
   `decided_by`, several may hold it and the returned count is the
   resistance signal; the shipped statuses (shipped_watching,
