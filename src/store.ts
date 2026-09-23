@@ -364,7 +364,7 @@ export class Store {
       // Ready is an independent commitment-readiness judgment: the actor
       // declaring it must not be the last one who shaped the description.
       if (input.status === 'ready' && actor.kind === 'agent') {
-        const shaper = this.lastShaper(p.id);
+        const shaper = input.body !== undefined && input.body !== p.body ? actor.name : this.lastShaper(p.id);
         if (shaper === actor.name) {
           throw new RoadmapError(
             `${p.id} was last shaped by you — deciding that enough is known to make an informed commitment needs an agent other than the description's shaper. Leave it shaping; another agent or the human can declare it ready.`,

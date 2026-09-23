@@ -65,6 +65,18 @@ describe('the ready gate', () => {
     expect(project.status).toBe('ready');
   });
 
+  it('an agent cannot reshape and declare ready in one update', () => {
+    const p = store.createProject(mason, { title: 'T', body: 'first sketch', status: 'shaping' });
+    expect(() => store.updateProject(bosun, {
+      project_id: p.id,
+      note: 'expanded it and called it ready',
+      body: 'a newly complete description',
+      status: 'ready',
+    })).toThrow(/shaped by you|description's shaper/);
+    expect(store.getProject(p.id).body).toBe('first sketch');
+    expect(store.getProject(p.id).status).toBe('shaping');
+  });
+
   it('the human is never gated', () => {
     const p = store.createProject(mason, { title: 'T', body: 'plan', status: 'shaping' });
     const { project } = store.updateProject(arthur, { project_id: p.id, note: 'good enough', status: 'ready' });
