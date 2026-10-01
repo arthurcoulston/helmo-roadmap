@@ -111,6 +111,13 @@ append-only event log, materialized state, `.immediate()` write transactions
   expanded on top, charter strip, everything else collapsed in derived rank
   order. No write routes at all — unlike Helmo's view there is no answer
   surface; add none.
+- `recovery.ts` / `recovery-lib.ts` — operator-only `roadmap-recovery`, absent
+  from MCP. `backup` requires explicit `--source-home`, `--installation`,
+  `--output-root`, and fresh `--output-dir`; `validate` replaces source-home
+  with an absolute `--backup`. Both create only a fresh 0700 run directory and
+  0600 database below a canonical owner-owned root, verify identity, exact
+  application schema, integrity and counts, retain failures, and never restore
+  live. Permissions isolate OS users, not hostile processes under one login.
 - `types.ts` — the vocabulary. Gates and stances are named in PRODUCT.md
   but deliberately absent from v1 behavior; leave the room, don't fill it.
 
